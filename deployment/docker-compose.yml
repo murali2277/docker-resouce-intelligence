@@ -1,0 +1,51 @@
+version: "3.8"
+
+services:
+  dri-agent:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+    container_name: dri-agent
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - dri-data:/var/lib/dri
+      - ../config/config.yaml:/app/config/config.yaml:ro
+    environment:
+      DRI_LOG_LEVEL: "INFO"
+      DRI_CONFIG: "/app/config/config.yaml"
+    networks:
+      - dri-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Optional: Prometheus for metrics scraping
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: dri-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    networks:
+      - dri-network
+    depends_on:
+      - dri-agent
+
+volumes:
+  dri-data:
+  prometheus-data:
+
+networks:
+  dri-network:
+    driver: bridge

@@ -1,0 +1,67 @@
+log_level: INFO
+log_json: false
+
+collector_interval: 5          # seconds
+aggregator_interval: 10        # seconds
+policy_check_interval: 10      # seconds
+
+storage:
+  sqlite_path: "/var/lib/dri/metrics.db"
+  retention_hours: 24
+  influxdb_enabled: false
+  influxdb_url: "http://influxdb:8086"
+  influxdb_token: ""
+  influxdb_org: "dri"
+  influxdb_bucket: "metrics"
+
+api:
+  host: "0.0.0.0"
+  port: 8000
+  enable_cors: true
+  prometheus_metrics: true
+
+actions:
+  throttle:
+    cpu_shares: 512
+    memory_limit: "512m"
+  isolate_cpuset: "0-1"
+  webhook_url: null
+  restart_grace_period: 30
+
+# Global default policy
+global_policy:
+  name: "global"
+  selector: {}
+  enabled: true
+  rules:
+    - metric: "memory"
+      operator: ">="
+      value: 85.0
+      duration_seconds: 60
+      action: "warning"
+
+    - metric: "memory_growth_rate_5m"
+      operator: ">"
+      value: 20.0
+      duration_seconds: 30
+      action: "warning"
+
+    - metric: "memory"
+      operator: ">="
+      value: 95.0
+      duration_seconds: 10
+      action: "throttle"
+
+# Per-container policies
+container_policies: []
+# Example:
+#  - name: "high_memory_workload"
+#    selector:
+#      image: "redis"
+#    enabled: true
+#    rules:
+#      - metric: "memory"
+#        operator: ">="
+#        value: 90.0
+#        duration_seconds: 30
+#        action: "throttle"
