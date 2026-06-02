@@ -135,7 +135,7 @@ curl http://localhost:8000/metrics
 Install development dependencies:
 
 ```bash
-pip install -r requirements.txt[dev]
+pip install -e .[dev]
 ```
 
 Run tests:

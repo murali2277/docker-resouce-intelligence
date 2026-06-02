@@ -118,8 +118,7 @@ class DockerEventListener:
                         # Filter for interesting events
                         if event.action in self.INTERESTING_EVENTS:
                             logger.debug(
-                                f"Docker event: {event.action}",
-                                container_id=event.container_id,
+                                f"Docker event: {event.action} ({event.container_id})"
                             )
                             yield event
                             await self._trigger_callbacks(event)
