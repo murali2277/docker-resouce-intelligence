@@ -310,7 +310,7 @@ async def get_recommendations(
 async def get_forecast(
     container_id: str,
     horizon_hours: int = Query(24, ge=1, le=168),
-    metric: str = Query("memory_percent", regex="^(cpu_percent|memory_percent)$"),
+    metric: str = Query("memory_percent", pattern="^(cpu_percent|memory_percent)$"),
 ) -> ForecastResponse:
     """
     Forecast CPU or memory usage N hours ahead for a container.

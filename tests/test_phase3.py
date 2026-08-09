@@ -209,6 +209,10 @@ async def test_recommendations_endpoint_returns_data():
     server = DRIAPIServer(config, storage, aggregator, pe)
 
     async with AsyncClient(transport=ASGITransport(app=server.app), base_url="http://test") as client:
+        # Manually trigger lifespan (set_dependencies)
+        import dri.api.routes as route_module
+        route_module.set_dependencies(storage, aggregator, pe, None, server.recommender, server.forecaster)
+
         resp = await client.get("/api/v1/recommendations")
         assert resp.status_code == 200
         data = resp.json()
@@ -248,6 +252,10 @@ async def test_recommendations_endpoint_with_sufficient_data():
     server = DRIAPIServer(config, storage, aggregator, pe)
 
     async with AsyncClient(transport=ASGITransport(app=server.app), base_url="http://test") as client:
+        # Manually trigger set_dependencies
+        import dri.api.routes as route_module
+        route_module.set_dependencies(storage, aggregator, pe, None, server.recommender, server.forecaster)
+
         resp = await client.get("/api/v1/recommendations?lookback_days=1&safety_margin=0.25")
         assert resp.status_code == 200
         data = resp.json()
