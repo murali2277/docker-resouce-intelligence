@@ -8,8 +8,7 @@ from typing import List, Optional, Dict, Any
 from contextlib import asynccontextmanager
 
 from sqlalchemy import create_engine, Column, String, Float, Integer, DateTime, Boolean, Text, event
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import declarative_base, sessionmaker, Session
 import sqlalchemy as sa
 
 from ..utils.logger import get_logger
@@ -272,3 +271,82 @@ class MetricsStorage:
                     logger.info(f"Cleaned up {deleted} old metric samples")
             except Exception as e:
                 logger.error(f"Failed to cleanup old data: {e}")
+
+    async def get_recent_alerts(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[AlertRecord]:
+        """Get recent alerts ordered newest-first."""
+        async with self.get_session() as session:
+            loop = asyncio.get_event_loop()
+
+            def _get() -> List[AlertRecord]:
+                return (
+                    session.query(AlertRecord)
+                    .order_by(AlertRecord.timestamp.desc())
+                    .offset(offset)
+                    .limit(limit)
+                    .all()
+                )
+
+            try:
+                results = await loop.run_in_executor(None, _get)
+                return results
+            except Exception as e:
+                logger.error(f"Failed to get alerts: {e}")
+                return []
+
+    async def get_recent_actions(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[ActionRecord]:
+        """Get recent actions ordered newest-first."""
+        async with self.get_session() as session:
+            loop = asyncio.get_event_loop()
+
+            def _get() -> List[ActionRecord]:
+                return (
+                    session.query(ActionRecord)
+                    .order_by(ActionRecord.timestamp.desc())
+                    .offset(offset)
+                    .limit(limit)
+                    .all()
+                )
+
+            try:
+                results = await loop.run_in_executor(None, _get)
+                return results
+            except Exception as e:
+                logger.error(f"Failed to get actions: {e}")
+                return []
+
+    async def count_alerts(self) -> int:
+        """Return total number of stored alerts."""
+        async with self.get_session() as session:
+            loop = asyncio.get_event_loop()
+
+            def _count() -> int:
+                return session.query(AlertRecord).count()
+
+            try:
+                return await loop.run_in_executor(None, _count)
+            except Exception as e:
+                logger.error(f"Failed to count alerts: {e}")
+                return 0
+
+    async def count_actions(self) -> int:
+        """Return total number of stored actions."""
+        async with self.get_session() as session:
+            loop = asyncio.get_event_loop()
+
+            def _count() -> int:
+                return session.query(ActionRecord).count()
+
+            try:
+                return await loop.run_in_executor(None, _count)
+            except Exception as e:
+                logger.error(f"Failed to count actions: {e}")
+                return 0
+
