@@ -26,6 +26,7 @@ class MetricsAggregator:
         self.storage = storage
         self._windows: Dict[str, deque] = {}  # Container ID -> metrics deque
         self._max_samples = 1000  # Max samples to keep in memory
+        self.metrics_processed: int = 0  # Total samples added across all containers
 
     def _get_window(self, container_id: str) -> deque:
         """Get or create metric window for container."""
@@ -37,6 +38,7 @@ class MetricsAggregator:
         """Add metrics sample to window."""
         window = self._get_window(metrics.container_id)
         window.append(metrics)
+        self.metrics_processed += 1
 
     def _calculate_moving_average(
         self,

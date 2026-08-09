@@ -1,6 +1,7 @@
 """Self-healing actions for OOM prediction and recovery."""
 
 import asyncio
+import time
 import uuid
 from datetime import datetime
 from typing import Dict, Any, Optional
@@ -107,7 +108,7 @@ class HealAction:
                 container.stop(timeout=stop_timeout)
 
                 # Small delay before restart
-                asyncio.run(asyncio.sleep(2))
+                time.sleep(2)
 
                 # Restart container
                 container.start()

@@ -103,6 +103,7 @@ class DRIAgent:
                 self.storage,
                 self.aggregator,
                 self.policy_engine,
+                self,  # agent reference for live counters
             )
 
             logger_module.info("DRI agent initialized successfully")
@@ -177,8 +178,8 @@ class DRIAgent:
                 # Aggregate all metrics
                 all_metrics = await self.aggregator.aggregate_all()
 
-                # Cleanup old data periodically
-                if self.aggregator.metrics_processed % 100 == 0:
+                # Cleanup old data periodically (every 100 metrics processed by agent)
+                if self.metrics_processed % 100 == 0 and self.metrics_processed > 0:
                     if self.storage:
                         await self.storage.cleanup_old_data(
                             self.config.storage.retention_hours

@@ -1,7 +1,7 @@
 """FastAPI server for DRI agent HTTP API."""
 
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Optional, Any
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import generate_latest, REGISTRY
@@ -27,6 +27,7 @@ class DRIAPIServer:
         storage: MetricsStorage,
         aggregator: MetricsAggregator,
         policy_engine: PolicyEngine,
+        agent: "Any" = None,
     ):
         """
         Initialize API server.
@@ -36,11 +37,13 @@ class DRIAPIServer:
             storage: Metrics storage instance
             aggregator: Metrics aggregator instance
             policy_engine: Policy engine instance
+            agent: Optional DRIAgent reference for live counters
         """
         self.config = config
         self.storage = storage
         self.aggregator = aggregator
         self.policy_engine = policy_engine
+        self.agent = agent
         self.app = self._create_app()
 
     def _create_app(self) -> FastAPI:
@@ -50,7 +53,7 @@ class DRIAPIServer:
         async def lifespan(app: FastAPI):
             logger.info("API server starting...")
             # Inject dependencies into routes
-            routes.set_dependencies(self.storage, self.aggregator, self.policy_engine)
+            routes.set_dependencies(self.storage, self.aggregator, self.policy_engine, self.agent)
             yield
             logger.info("API server stopping...")
 

@@ -1,7 +1,7 @@
 """FastAPI routes for DRI agent HTTP API."""
 
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Any
 from fastapi import APIRouter, HTTPException, Query
 from prometheus_client import Counter, Histogram
 import time
@@ -12,7 +12,9 @@ from ..core.engine import PolicyEngine
 from .models import (
     MetricsResponse,
     ContainerMetricsListResponse,
+    AlertResponse,
     AlertsResponse,
+    ActionHistoryResponse,
     ActionHistoryListResponse,
     PoliciesResponse,
     HealthCheckResponse,
@@ -36,6 +38,7 @@ metrics_latency = Histogram(
 storage: Optional[MetricsStorage] = None
 aggregator: Optional[MetricsAggregator] = None
 policy_engine: Optional[PolicyEngine] = None
+agent: Optional[Any] = None  # DRIAgent reference for live counters
 start_time: float = time.time()
 
 
@@ -43,12 +46,14 @@ def set_dependencies(
     s: MetricsStorage,
     a: MetricsAggregator,
     pe: PolicyEngine,
+    ag: Optional[Any] = None,
 ) -> None:
     """Inject dependencies into routes."""
-    global storage, aggregator, policy_engine
+    global storage, aggregator, policy_engine, agent
     storage = s
     aggregator = a
     policy_engine = pe
+    agent = ag
 
 
 @router.get("/health", response_model=HealthCheckResponse)
@@ -58,14 +63,20 @@ async def health_check() -> HealthCheckResponse:
 
     with metrics_latency.labels(endpoint="health").time():
         uptime = time.time() - start_time
+
+        # Read real counters from the DRIAgent if available
+        metrics_processed = agent.metrics_processed if agent else 0
+        alerts_generated = agent.alerts_generated if agent else 0
+        actions_executed = agent.actions_executed if agent else 0
+
         return HealthCheckResponse(
             status="healthy",
             version="0.1.0",
             timestamp=datetime.utcnow(),
             uptime_seconds=uptime,
-            metrics_processed=0,  # TODO: track this
-            alerts_generated=0,  # TODO: track this
-            actions_executed=0,  # TODO: track this
+            metrics_processed=metrics_processed,
+            alerts_generated=alerts_generated,
+            actions_executed=actions_executed,
         )
 
 
@@ -125,11 +136,29 @@ async def get_alerts(
         if not storage:
             raise HTTPException(status_code=500, detail="Storage not initialized")
 
-        # TODO: Implement alert retrieval from storage
+        records = await storage.get_recent_alerts(limit=limit, offset=offset)
+        total = await storage.count_alerts()
+
+        alert_responses = [
+            AlertResponse(
+                alert_id=r.id,
+                container_id=r.container_id,
+                container_name=r.container_name,
+                timestamp=r.timestamp,
+                alert_type=r.alert_type,
+                metric=r.metric,
+                current_value=r.current_value,
+                threshold=r.threshold,
+                message=r.message,
+                acknowledged=r.acknowledged,
+            )
+            for r in records
+        ]
+
         return AlertsResponse(
             timestamp=datetime.utcnow(),
-            alerts=[],
-            total_count=0,
+            alerts=alert_responses,
+            total_count=total,
         )
 
 
@@ -151,11 +180,27 @@ async def get_action_history(
         if not storage:
             raise HTTPException(status_code=500, detail="Storage not initialized")
 
-        # TODO: Implement action history retrieval from storage
+        records = await storage.get_recent_actions(limit=limit, offset=offset)
+        total = await storage.count_actions()
+
+        action_responses = [
+            ActionHistoryResponse(
+                action_id=r.id,
+                container_id=r.container_id,
+                container_name=r.container_name,
+                timestamp=r.timestamp,
+                action_type=r.action_type,
+                reason=r.reason,
+                success=r.success,
+                error_message=r.error_message,
+            )
+            for r in records
+        ]
+
         return ActionHistoryListResponse(
             timestamp=datetime.utcnow(),
-            actions=[],
-            total_count=0,
+            actions=action_responses,
+            total_count=total,
         )
 
 
@@ -177,7 +222,7 @@ async def get_policies() -> PoliciesResponse:
             "name": global_policy.name,
             "enabled": global_policy.enabled,
             "selector": global_policy.selector,
-            "rules": [r.dict() for r in global_policy.rules],
+            "rules": [r.model_dump() for r in global_policy.rules],
         })
 
         # Add per-container policies
@@ -186,7 +231,7 @@ async def get_policies() -> PoliciesResponse:
                 "name": policy.name,
                 "enabled": policy.enabled,
                 "selector": policy.selector,
-                "rules": [r.dict() for r in policy.rules],
+                "rules": [r.model_dump() for r in policy.rules],
             })
 
         return PoliciesResponse(
