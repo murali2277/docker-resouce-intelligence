@@ -40,13 +40,107 @@ class MetricsAggregator:
         window.append(metrics)
         self.metrics_processed += 1
 
+    # ------------------------------------------------------------------
+    # Hybrid sample retrieval: deque (fast path) + SQLite (fallback)
+    # ------------------------------------------------------------------
+
+    async def _get_samples_for_window(
+        self,
+        container_id: str,
+        minutes: int,
+    ) -> List:
+        """
+        Return metric samples covering the requested time window.
+
+        Strategy:
+          1. Check if the in-memory deque already covers the full window.
+          2. If the oldest deque sample is younger than the cutoff, fall back
+             to SQLite for the remaining history and merge the two sets,
+             deduplicating by timestamp.
+
+        Args:
+            container_id: Container to query
+            minutes: How many minutes back to cover
+
+        Returns:
+            List of metric objects (ContainerMetrics or MetricsSample),
+            sorted oldest-first.  Both have ``timestamp`` and
+            ``cpu_percent`` / ``memory_percent`` attributes.
+        """
+        cutoff = datetime.utcnow() - timedelta(minutes=minutes)
+        window = self._get_window(container_id)
+
+        # Fast path: deque covers the whole window
+        if window and window[0].timestamp <= cutoff:
+            return [m for m in window if m.timestamp >= cutoff]
+
+        # Slow path: supplement with DB rows
+        db_samples: List[MetricsSample] = []
+        try:
+            db_samples = await self.storage.get_recent_metrics(container_id, minutes=minutes)
+        except Exception as e:
+            logger.warning(f"DB fallback failed for {container_id}: {e}")
+
+        # Merge: db_samples (older, ordered asc) + deque items (newer)
+        mem_samples = list(window)
+        db_timestamps = {s.timestamp for s in db_samples}
+
+        # Only keep mem samples not already in the DB result set
+        extra_mem = [m for m in mem_samples if m.timestamp not in db_timestamps]
+
+        all_samples = db_samples + extra_mem
+        all_samples.sort(key=lambda m: m.timestamp)
+        return [m for m in all_samples if m.timestamp >= cutoff]
+
+    # ------------------------------------------------------------------
+    # Aggregation helpers (now hybrid-aware)
+    # ------------------------------------------------------------------
+
+    async def _calculate_moving_average_hybrid(
+        self,
+        container_id: str,
+        minutes: int,
+        field: str,
+    ) -> float:
+        """Calculate moving average using hybrid deque+DB samples."""
+        samples = await self._get_samples_for_window(container_id, minutes)
+        values = [getattr(m, field) for m in samples if getattr(m, field, None) is not None]
+        if not values:
+            return 0.0
+        return round(statistics.mean(values), 2)
+
+    async def _calculate_growth_rate_hybrid(
+        self,
+        container_id: str,
+        minutes: int,
+    ) -> float:
+        """Calculate memory growth rate using hybrid deque+DB samples."""
+        samples = await self._get_samples_for_window(container_id, minutes)
+        pairs = [(m.timestamp, m.memory_percent) for m in samples if m.memory_percent is not None]
+
+        if len(pairs) < 2:
+            return 0.0
+
+        first = pairs[0]
+        last = pairs[-1]
+        time_delta_minutes = (last[0] - first[0]).total_seconds() / 60
+        if time_delta_minutes == 0:
+            return 0.0
+
+        memory_delta = last[1] - first[1]
+        return round(memory_delta / time_delta_minutes, 2)
+
+    # ------------------------------------------------------------------
+    # Legacy sync helpers (kept for backward compatibility / sync callers)
+    # ------------------------------------------------------------------
+
     def _calculate_moving_average(
         self,
         window: deque,
         minutes: int,
         field: str,
     ) -> float:
-        """Calculate moving average for a metric."""
+        """Calculate moving average for a metric (in-memory only)."""
         if not window:
             return 0.0
 
@@ -131,34 +225,36 @@ class MetricsAggregator:
         """
         Calculate aggregated metrics for a container.
 
+        Uses the hybrid (deque + SQLite) approach for all time windows,
+        so 60-minute averages are accurate even when the deque doesn't
+        cover the full window.
+
         Args:
             container_id: Container ID
 
         Returns:
             AggregatedMetrics or None if insufficient data
         """
-        loop = asyncio.get_event_loop()
+        window = self._get_window(container_id)
+        if not window:
+            return None
 
-        def _aggregate() -> Optional[AggregatedMetrics]:
-            window = self._get_window(container_id)
-            if not window:
-                return None
+        # Get latest metrics to extract container info
+        latest = window[-1]
 
-            # Get latest metrics to extract container info
-            latest = window[-1]
+        try:
+            # Calculate moving averages using hybrid approach
+            cpu_5m = await self._calculate_moving_average_hybrid(container_id, 5, "cpu_percent")
+            cpu_15m = await self._calculate_moving_average_hybrid(container_id, 15, "cpu_percent")
+            cpu_60m = await self._calculate_moving_average_hybrid(container_id, 60, "cpu_percent")
 
-            # Calculate moving averages
-            cpu_5m = self._calculate_moving_average(window, 5, "cpu_percent")
-            cpu_15m = self._calculate_moving_average(window, 15, "cpu_percent")
-            cpu_60m = self._calculate_moving_average(window, 60, "cpu_percent")
+            mem_5m = await self._calculate_moving_average_hybrid(container_id, 5, "memory_percent")
+            mem_15m = await self._calculate_moving_average_hybrid(container_id, 15, "memory_percent")
+            mem_60m = await self._calculate_moving_average_hybrid(container_id, 60, "memory_percent")
 
-            mem_5m = self._calculate_moving_average(window, 5, "memory_percent")
-            mem_15m = self._calculate_moving_average(window, 15, "memory_percent")
-            mem_60m = self._calculate_moving_average(window, 60, "memory_percent")
-
-            # Calculate growth rates
-            growth_1m = self._calculate_growth_rate(window, 1)
-            growth_5m = self._calculate_growth_rate(window, 5)
+            # Calculate growth rates using hybrid approach
+            growth_1m = await self._calculate_growth_rate_hybrid(container_id, 1)
+            growth_5m = await self._calculate_growth_rate_hybrid(container_id, 5)
 
             agg_metrics = AggregatedMetrics(
                 container_id=latest.container_id,
@@ -183,9 +279,6 @@ class MetricsAggregator:
 
             return agg_metrics
 
-        try:
-            result = await loop.run_in_executor(None, _aggregate)
-            return result
         except Exception as e:
             logger.error(f"Aggregation failed for {container_id}: {e}")
             return None
