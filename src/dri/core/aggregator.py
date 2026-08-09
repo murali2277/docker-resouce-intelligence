@@ -9,6 +9,7 @@ import statistics
 from ..utils.logger import get_logger
 from ..utils.metrics import ContainerMetrics, AggregatedMetrics
 from .storage import MetricsStorage, MetricsSample
+from .recommender import z_score_anomaly
 
 logger = get_logger("aggregator")
 
@@ -193,16 +194,38 @@ class MetricsAggregator:
         memory_delta = last[1] - first[1]
         return round(memory_delta / time_delta_minutes, 2)
 
-    def _detect_anomaly(self, metrics: AggregatedMetrics) -> Tuple[bool, Optional[str]]:
+    def _detect_anomaly(
+        self,
+        metrics: AggregatedMetrics,
+        window: "deque | None" = None,
+    ) -> Tuple[bool, Optional[str]]:
         """
-        Detect memory anomalies (sudden spikes).
+        Detect CPU and memory anomalies.
+
+        Uses per-container z-score when sufficient history is available in the
+        deque; falls back to fixed thresholds for small windows.
 
         Args:
             metrics: Aggregated metrics
+            window: Optional in-memory deque for baseline computation
 
         Returns:
             Tuple of (is_anomaly, anomaly_type)
         """
+        # --- Statistical z-score path (when enough history exists) ---
+        if window and len(window) >= 20:
+            cpu_history = [m.cpu_percent for m in window]
+            mem_history = [m.memory_percent for m in window]
+
+            cpu_anomaly, cpu_z = z_score_anomaly(cpu_history, metrics.cpu_percent, threshold=3.0)
+            if cpu_anomaly:
+                return True, "cpu_spike"
+
+            mem_anomaly, mem_z = z_score_anomaly(mem_history, metrics.memory_percent, threshold=3.0)
+            if mem_anomaly:
+                return True, "memory_spike"
+
+        # --- Legacy threshold path ---
         # Spike detection: sudden memory increase > 20% in 5 minutes
         if metrics.memory_growth_rate_5m > 20.0:
             return True, "memory_spike"
@@ -272,8 +295,8 @@ class MetricsAggregator:
                 memory_growth_rate_5m=growth_5m,
             )
 
-            # Detect anomalies
-            is_anomaly, anomaly_type = self._detect_anomaly(agg_metrics)
+            # Detect anomalies (pass the window for z-score baseline)
+            is_anomaly, anomaly_type = self._detect_anomaly(agg_metrics, window=window)
             agg_metrics.is_anomaly = is_anomaly
             agg_metrics.anomaly_type = anomaly_type
 

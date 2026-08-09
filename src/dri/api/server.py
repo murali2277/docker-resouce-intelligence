@@ -12,6 +12,7 @@ from ..utils.logger import get_logger
 from ..core.storage import MetricsStorage
 from ..core.aggregator import MetricsAggregator
 from ..core.engine import PolicyEngine
+from ..core.recommender import ResourceRecommender
 from ..config import DRIConfig
 from . import routes
 
@@ -27,7 +28,7 @@ class DRIAPIServer:
         storage: MetricsStorage,
         aggregator: MetricsAggregator,
         policy_engine: PolicyEngine,
-        agent: "Any" = None,
+        agent: Optional[Any] = None,
     ):
         """
         Initialize API server.
@@ -44,7 +45,22 @@ class DRIAPIServer:
         self.aggregator = aggregator
         self.policy_engine = policy_engine
         self.agent = agent
+
+        # Instantiate Phase 3/4 components
+        self.recommender = ResourceRecommender(storage)
+        # Forecaster is imported lazily to avoid hard statsmodels dep
+        self.forecaster = self._create_forecaster()
+
         self.app = self._create_app()
+
+    def _create_forecaster(self) -> Any:
+        """Lazily create forecaster, returning None if module unavailable."""
+        try:
+            from ..core.forecaster import MetricsForecaster
+            return MetricsForecaster(self.storage)
+        except ImportError:
+            logger.warning("forecaster module not available — /forecast endpoint will return 503")
+            return None
 
     def _create_app(self) -> FastAPI:
         """Create FastAPI application."""
@@ -52,8 +68,15 @@ class DRIAPIServer:
         @asynccontextmanager
         async def lifespan(app: FastAPI):
             logger.info("API server starting...")
-            # Inject dependencies into routes
-            routes.set_dependencies(self.storage, self.aggregator, self.policy_engine, self.agent)
+            # Inject all dependencies into routes
+            routes.set_dependencies(
+                self.storage,
+                self.aggregator,
+                self.policy_engine,
+                self.agent,
+                self.recommender,
+                self.forecaster,
+            )
             yield
             logger.info("API server stopping...")
 
@@ -95,6 +118,15 @@ class DRIAPIServer:
                 "version": "0.1.0",
                 "docs": "/docs",
                 "health": "/api/v1/health",
+                "endpoints": [
+                    "/api/v1/health",
+                    "/api/v1/metrics",
+                    "/api/v1/alerts",
+                    "/api/v1/actions/history",
+                    "/api/v1/policies",
+                    "/api/v1/recommendations",
+                    "/api/v1/forecast/{container_id}",
+                ],
             }
 
         return app

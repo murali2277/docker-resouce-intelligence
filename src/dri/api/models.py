@@ -103,3 +103,48 @@ class ErrorResponse(BaseModel):
     error: str
     message: str
     timestamp: datetime
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: Recommendations
+# ---------------------------------------------------------------------------
+
+class RecommendationResponse(BaseModel):
+    """Resource limit recommendation for a single container."""
+    container_id: str
+    container_name: str
+    recommended_cpu_pct: float = Field(description="Recommended CPU limit as % (p95 + safety margin)")
+    recommended_memory_bytes: int = Field(description="Recommended memory limit in bytes")
+    p95_cpu: float
+    p95_memory_bytes: int
+    p95_memory_pct: float
+    sample_count: int
+    lookback_days: int
+    safety_margin: float
+    is_memory_leak: bool = False
+    memory_leak_slope_pct_per_hour: float = 0.0
+
+
+class RecommendationsListResponse(BaseModel):
+    """List of per-container resource recommendations."""
+    timestamp: datetime
+    recommendations: List[RecommendationResponse]
+    total_count: int
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: Forecasting
+# ---------------------------------------------------------------------------
+
+class ForecastResponse(BaseModel):
+    """Resource usage forecast for a container."""
+    container_id: str
+    metric: str = Field(description="'cpu_percent' or 'memory_percent'")
+    horizon_hours: int
+    current_value: float
+    predicted_value: float
+    confidence_low: float
+    confidence_high: float
+    predicted_at: datetime
+    method_used: str = Field(description="'linear_regression' or 'ses'")
+    sample_count: int

@@ -18,6 +18,9 @@ from .models import (
     ActionHistoryListResponse,
     PoliciesResponse,
     HealthCheckResponse,
+    RecommendationResponse,
+    RecommendationsListResponse,
+    ForecastResponse,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["metrics"])
@@ -38,7 +41,9 @@ metrics_latency = Histogram(
 storage: Optional[MetricsStorage] = None
 aggregator: Optional[MetricsAggregator] = None
 policy_engine: Optional[PolicyEngine] = None
-agent: Optional[Any] = None  # DRIAgent reference for live counters
+agent: Optional[Any] = None         # DRIAgent reference for live counters
+recommender: Optional[Any] = None   # ResourceRecommender
+forecaster: Optional[Any] = None    # MetricsForecaster
 start_time: float = time.time()
 
 
@@ -47,13 +52,17 @@ def set_dependencies(
     a: MetricsAggregator,
     pe: PolicyEngine,
     ag: Optional[Any] = None,
+    rec: Optional[Any] = None,
+    fore: Optional[Any] = None,
 ) -> None:
     """Inject dependencies into routes."""
-    global storage, aggregator, policy_engine, agent
+    global storage, aggregator, policy_engine, agent, recommender, forecaster
     storage = s
     aggregator = a
     policy_engine = pe
     agent = ag
+    recommender = rec
+    forecaster = fore
 
 
 @router.get("/health", response_model=HealthCheckResponse)
@@ -239,3 +248,96 @@ async def get_policies() -> PoliciesResponse:
             policies=policies,
             total_count=len(policies),
         )
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: Recommendations
+# ---------------------------------------------------------------------------
+
+@router.get("/recommendations", response_model=RecommendationsListResponse)
+async def get_recommendations(
+    lookback_days: int = Query(7, ge=1, le=30),
+    safety_margin: float = Query(0.20, ge=0.05, le=1.0),
+) -> RecommendationsListResponse:
+    """
+    Get per-container resource limit recommendations.
+
+    Recommendations are based on p95 CPU and memory usage over the lookback
+    window, plus the specified safety margin.
+
+    Query Parameters:
+        lookback_days: Days of history to use (default 7, max 30)
+        safety_margin: Fractional overhead on top of p95 (default 0.20 = +20%)
+    """
+    metrics_requests.labels(method="GET", endpoint="recommendations").inc()
+
+    with metrics_latency.labels(endpoint="recommendations").time():
+        if not recommender:
+            raise HTTPException(status_code=503, detail="Recommender not initialized")
+        if not aggregator:
+            raise HTTPException(status_code=503, detail="Aggregator not initialized")
+
+        # Get all known containers from the aggregator's in-memory windows
+        container_ids = list(aggregator._windows.keys())
+
+        # Also query storage for any containers not in current windows
+        # (containers that were active historically but not right now)
+        recs = []
+        for cid in container_ids:
+            window = aggregator._windows.get(cid)
+            cname = window[-1].container_name if window else ""
+            rec = await recommender.compute_recommendation(
+                container_id=cid,
+                container_name=cname,
+                lookback_days=lookback_days,
+                safety_margin=safety_margin,
+            )
+            if rec:
+                recs.append(RecommendationResponse(**rec.to_dict()))
+
+        return RecommendationsListResponse(
+            timestamp=datetime.utcnow(),
+            recommendations=recs,
+            total_count=len(recs),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: Forecasting
+# ---------------------------------------------------------------------------
+
+@router.get("/forecast/{container_id}", response_model=ForecastResponse)
+async def get_forecast(
+    container_id: str,
+    horizon_hours: int = Query(24, ge=1, le=168),
+    metric: str = Query("memory_percent", regex="^(cpu_percent|memory_percent)$"),
+) -> ForecastResponse:
+    """
+    Forecast CPU or memory usage N hours ahead for a container.
+
+    Path Parameters:
+        container_id: Short container ID (12 chars)
+
+    Query Parameters:
+        horizon_hours: How many hours ahead to forecast (default 24, max 168)
+        metric: 'cpu_percent' or 'memory_percent' (default memory_percent)
+    """
+    metrics_requests.labels(method="GET", endpoint="forecast").inc()
+
+    with metrics_latency.labels(endpoint="forecast").time():
+        if not forecaster:
+            raise HTTPException(status_code=503, detail="Forecaster not initialized")
+
+        result = await forecaster.forecast(
+            container_id=container_id,
+            horizon_hours=horizon_hours,
+            metric=metric,
+        )
+
+        if result is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No forecast data for container '{container_id}' — insufficient history",
+            )
+
+        return ForecastResponse(**result.to_dict())
