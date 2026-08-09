@@ -3,7 +3,7 @@
 import asyncio
 from pathlib import Path
 from typing import Dict, Any, Optional, List
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 import yaml
 import os
 
@@ -20,13 +20,15 @@ class ThresholdRule(BaseModel):
     duration_seconds: int = 60  # How long before triggering
     action: str  # "warning", "throttle", "isolate", "restart"
 
-    @validator("operator")
+    @field_validator("operator")
+    @classmethod
     def validate_operator(cls, v: str) -> str:
         if v not in [">", "<", ">=", "<=", "=="]:
             raise ValueError(f"Invalid operator: {v}")
         return v
 
-    @validator("action")
+    @field_validator("action")
+    @classmethod
     def validate_action(cls, v: str) -> str:
         if v not in ["warning", "throttle", "isolate", "restart", "webhook"]:
             raise ValueError(f"Invalid action: {v}")
@@ -94,7 +96,8 @@ class DRIConfig(BaseModel):
     global_policy: ContainerPolicy = Field(default_factory=lambda: ContainerPolicy(name="global"))
     container_policies: List[ContainerPolicy] = Field(default_factory=list)
 
-    @validator("log_level")
+    @field_validator("log_level")
+    @classmethod
     def validate_log_level(cls, v: str) -> str:
         if v not in ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]:
             raise ValueError(f"Invalid log level: {v}")
