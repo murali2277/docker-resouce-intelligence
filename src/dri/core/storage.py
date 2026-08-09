@@ -89,24 +89,37 @@ class MetricsStorage:
         Initialize storage backend.
 
         Args:
-            db_path: Path to SQLite database file
+            db_path: Path to SQLite database file, or ":memory:" for in-memory testing
         """
-        self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._in_memory = db_path == ":memory:"
+        if not self._in_memory:
+            self.db_path = Path(db_path)
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            db_url = f"sqlite:///{self.db_path}"
+            connect_args: dict = {"check_same_thread": False}
+        else:
+            self.db_path = Path(":memory:")
+            # Use a shared in-memory DB so all sessions share the same connection
+            db_url = "sqlite:///:memory:"
+            connect_args = {"check_same_thread": False}
 
         self.engine = create_engine(
-            f"sqlite:///{self.db_path}",
-            connect_args={"check_same_thread": False},
+            db_url,
+            connect_args=connect_args,
             echo=False,
+            # For in-memory, use StaticPool so all sessions share one connection
+            **({"poolclass": __import__('sqlalchemy.pool', fromlist=['StaticPool']).StaticPool}
+               if self._in_memory else {}),
         )
 
-        # Enable WAL mode for better concurrency
-        @event.listens_for(self.engine, "connect")
-        def set_sqlite_pragma(dbapi_conn: Any, connection_record: Any) -> None:
-            cursor = dbapi_conn.cursor()
-            cursor.execute("PRAGMA journal_mode=WAL")
-            cursor.execute("PRAGMA synchronous=NORMAL")
-            cursor.close()
+        # Enable WAL mode for better concurrency (skip for in-memory)
+        if not self._in_memory:
+            @event.listens_for(self.engine, "connect")
+            def set_sqlite_pragma(dbapi_conn: Any, connection_record: Any) -> None:
+                cursor = dbapi_conn.cursor()
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA synchronous=NORMAL")
+                cursor.close()
 
         self.SessionLocal = sessionmaker(bind=self.engine)
         self._initialized = False
