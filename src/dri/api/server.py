@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import generate_latest, REGISTRY
 from fastapi.responses import Response
 import asyncio
+import uvicorn
 
 from ..utils.logger import get_logger
 from ..core.storage import MetricsStorage
@@ -65,18 +66,19 @@ class DRIAPIServer:
     def _create_app(self) -> FastAPI:
         """Create FastAPI application."""
 
+        # Inject dependencies eagerly so routes are ready before first request
+        routes.set_dependencies(
+            self.storage,
+            self.aggregator,
+            self.policy_engine,
+            self.agent,
+            self.recommender,
+            self.forecaster,
+        )
+
         @asynccontextmanager
         async def lifespan(app: FastAPI):
-            logger.info("API server starting...")
-            # Inject all dependencies into routes
-            routes.set_dependencies(
-                self.storage,
-                self.aggregator,
-                self.policy_engine,
-                self.agent,
-                self.recommender,
-                self.forecaster,
-            )
+            logger.info("API server ready")
             yield
             logger.info("API server stopping...")
 
@@ -132,16 +134,44 @@ class DRIAPIServer:
         return app
 
     async def start(self) -> None:
-        """Start the API server."""
+        """Start the API server with uvicorn in a background thread."""
+        import threading
+
+        logger.info(
+            f"Starting API server on {self.config.api.host}:{self.config.api.port}"
+        )
+
+        config = uvicorn.Config(
+            app=self.app,
+            host=self.config.api.host,
+            port=self.config.api.port,
+            log_level="info",
+            access_log=False,
+        )
+        server = uvicorn.Server(config)
+        # Let the agent's signal handlers take precedence
+        server.install_signal_handlers = False
+
+        # Run uvicorn in a dedicated thread so its internal event loop
+        # doesn't interfere with the agent's asyncio.gather() loop.
+        loop = asyncio.get_event_loop()
+        ready = asyncio.Event()
+
+        def _run() -> None:
+            import asyncio as _asyncio
+            _asyncio.run(server.serve())
+
+        thread = threading.Thread(target=_run, daemon=True, name="uvicorn")
+        thread.start()
+
+        # Keep this coroutine alive so gather() doesn't exit
         try:
-            logger.info(
-                f"Starting API server on {self.config.api.host}:{self.config.api.port}"
-            )
-            # This is typically run with uvicorn in production
-            # For development, use: uvicorn app:app --reload
-        except Exception as e:
-            logger.error(f"Failed to start API server: {e}")
-            raise
+            while thread.is_alive():
+                await asyncio.sleep(1)
+        finally:
+            server.should_exit = True
+            thread.join(timeout=5)
+
 
     def get_app(self) -> FastAPI:
         """Get FastAPI application instance."""

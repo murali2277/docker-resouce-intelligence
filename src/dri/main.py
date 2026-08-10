@@ -308,13 +308,20 @@ class DRIAgent:
         signal.signal(signal.SIGINT, signal_handler)
 
         try:
-            # Concurrently run all agent loops
+            # Concurrently run all agent loops + the HTTP API server
             tasks = [
                 self._collect_metrics_loop(),
                 self._aggregate_metrics_loop(),
                 self._policy_check_loop(),
                 self._event_listener_loop(),
             ]
+
+            if self.api_server:
+                logger_module.info(
+                    f"Starting API server on "
+                    f"{self.config.api.host}:{self.config.api.port}"
+                )
+                tasks.append(self.api_server.start())
 
             await asyncio.gather(*tasks)
 
