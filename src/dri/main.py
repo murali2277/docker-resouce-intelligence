@@ -116,10 +116,8 @@ class DRIAgent:
         """Handle generated alerts."""
         self.alerts_generated += 1
         logger_module.warning(
-            f"Alert generated: {alert.alert_type}",
-            container_id=alert.container_id,
-            metric=alert.metric,
-            current_value=alert.current_value,
+            f"Alert generated: {alert.alert_type} "
+            f"[container={alert.container_id}, metric={alert.metric}, value={alert.current_value}]"
         )
 
         # Save to storage
@@ -129,9 +127,8 @@ class DRIAgent:
     async def _on_docker_event(self, event) -> None:
         """Handle Docker events."""
         logger_module.info(
-            f"Docker event: {event.action}",
-            container_id=event.container_id,
-            container_name=event.container_name,
+            f"Docker event: {event.action} "
+            f"[container={event.container_id}, name={event.container_name}]"
         )
 
     async def _collect_metrics_loop(self) -> None:
@@ -290,9 +287,8 @@ class DRIAgent:
                 # Handle specific events
                 if event.action == "oom":
                     logger_module.critical(
-                        f"OOM event detected",
-                        container_id=event.container_id,
-                        container_name=event.container_name,
+                        f"OOM event detected "
+                        f"[container={event.container_id}, name={event.container_name}]"
                     )
 
         except Exception as e:
