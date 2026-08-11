@@ -7,7 +7,23 @@ policy_check_interval: 10      # seconds
 
 storage:
   sqlite_path: "/var/lib/dri/metrics.db"
-  retention_hours: 24
+
+  # retention_hours controls how long raw metric samples are kept in SQLite.
+  #
+  # This MUST be >= (recommender lookback_days * 24) to avoid computing
+  # recommendations on partial history and triggering the data_completeness
+  # warning. The recommender default is 7 days (168 h); max lookback is 30
+  # days (720 h).
+  #
+  # Storage size estimate (SQLite, at 5 s collector interval):
+  #   ~12 samples/min × 60 min × 24 h × 7 days = ~120,960 rows/container
+  #   Each row ≈ ~150 bytes  →  ~18 MB per container per 7 days
+  #   10 containers × 7 days ≈ 180 MB total
+  #
+  # Raise to 720 (30 days) only if you need max-lookback recommendations;
+  # budget ~780 MB for 10 containers at that setting.
+  retention_hours: 168   # 7 days — matches the recommender's default lookback
+
   influxdb_enabled: false
   influxdb_url: "http://influxdb:8086"
   influxdb_token: ""

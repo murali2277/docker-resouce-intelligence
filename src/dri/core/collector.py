@@ -3,7 +3,7 @@
 import asyncio
 import json
 from datetime import datetime
-from typing import AsyncIterator, Optional, Dict, Any
+from typing import AsyncIterator, Optional, Dict, Any, List
 import docker
 from docker.models.containers import Container
 
@@ -29,7 +29,7 @@ class DockerStatsCollector:
 
     async def connect(self) -> None:
         """Connect to Docker daemon."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _connect() -> docker.DockerClient:
             if self.docker_host:
@@ -46,7 +46,7 @@ class DockerStatsCollector:
     async def disconnect(self) -> None:
         """Disconnect from Docker daemon."""
         if self.client:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, self.client.close)
             logger.info("Disconnected from Docker daemon")
 
@@ -55,7 +55,7 @@ class DockerStatsCollector:
         if not self.client:
             raise RuntimeError("Not connected to Docker daemon")
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _get_containers() -> list:
             return self.client.containers.list()
@@ -77,7 +77,7 @@ class DockerStatsCollector:
         Returns:
             ContainerMetrics or None if collection fails
         """
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _get_stats() -> Dict[str, Any]:
             try:
@@ -160,6 +160,12 @@ class DockerStatsCollector:
         """
         Continuously stream container metrics.
 
+        Per-container stats are collected in **parallel** via asyncio.gather so
+        that a slow or unresponsive container does not block collection for the
+        rest.  Each collect_stats() call has its own 5-second timeout (see
+        collect_stats), so the total wall-clock time per tick is bounded by the
+        slowest container rather than the sum of all containers.
+
         Args:
             interval: Collection interval in seconds
 
@@ -178,9 +184,14 @@ class DockerStatsCollector:
                 containers = await self.get_containers()
                 consecutive_errors = 0
 
-                for container in containers:
-                    metrics = await self.collect_stats(container)
-                    if metrics:
+                # Collect stats for all containers in parallel
+                results: List[Optional[ContainerMetrics]] = await asyncio.gather(
+                    *[self.collect_stats(c) for c in containers],
+                    return_exceptions=False,
+                )
+
+                for metrics in results:
+                    if metrics is not None:
                         yield metrics
 
                 await asyncio.sleep(interval)

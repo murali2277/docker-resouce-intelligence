@@ -113,16 +113,42 @@ class RecommendationResponse(BaseModel):
     """Resource limit recommendation for a single container."""
     container_id: str
     container_name: str
-    recommended_cpu_pct: float = Field(description="Recommended CPU limit as % (p95 + safety margin)")
-    recommended_memory_bytes: int = Field(description="Recommended memory limit in bytes")
+    recommended_cpu_pct: float = Field(
+        description="Recommended CPU limit as % (p95 + safety margin)"
+    )
+    recommended_memory_bytes: int = Field(
+        description="Recommended memory limit in bytes"
+    )
     p95_cpu: float
     p95_memory_bytes: int
     p95_memory_pct: float
+
+    # Data quality / completeness signals
     sample_count: int
     lookback_days: int
+    lookback_actual_days: float = Field(
+        description="Actual span of available data in days"
+    )
     safety_margin: float
+    data_completeness: Optional[str] = Field(
+        None,
+        description='e.g. "3.2 of 7.0 days available"',
+    )
+    confidence_tier: str = Field(
+        "low",
+        description='"low" (<50 samples), "medium" (<300), or "high" (>=300)',
+    )
+
+    # Memory anomalies
     is_memory_leak: bool = False
     memory_leak_slope_pct_per_hour: float = 0.0
+
+    # Idle / scale-to-zero signal (merged from ScaleAction)
+    is_idle: bool = False
+    idle_recommendation: Optional[str] = None
+
+    # Cache metadata — present when served from background cache
+    computed_at: Optional[datetime] = None
 
 
 class RecommendationsListResponse(BaseModel):
@@ -130,6 +156,19 @@ class RecommendationsListResponse(BaseModel):
     timestamp: datetime
     recommendations: List[RecommendationResponse]
     total_count: int
+
+
+# ---------------------------------------------------------------------------
+# Insufficient-data response
+# ---------------------------------------------------------------------------
+
+class InsufficientDataResponse(BaseModel):
+    """Returned for containers where there is not enough history yet."""
+    container_id: str
+    container_name: str = ""
+    status: str = "insufficient_data"
+    min_samples_required: int
+    samples_available: int
 
 
 # ---------------------------------------------------------------------------
@@ -148,3 +187,6 @@ class ForecastResponse(BaseModel):
     predicted_at: datetime
     method_used: str = Field(description="'linear_regression' or 'ses'")
     sample_count: int
+
+    # Cache metadata — present when served from background cache
+    computed_at: Optional[datetime] = None

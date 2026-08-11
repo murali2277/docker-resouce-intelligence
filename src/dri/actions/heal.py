@@ -92,7 +92,7 @@ class HealAction:
         Returns:
             Result dictionary
         """
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _restart() -> Dict[str, Any]:
             try:

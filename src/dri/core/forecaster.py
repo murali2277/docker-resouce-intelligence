@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Optional, Literal
+from typing import Optional, Literal, Union
 
 import numpy as np
 
@@ -34,6 +34,30 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Data structures
 # ---------------------------------------------------------------------------
+
+
+@dataclass
+class InsufficientForecastData:
+    """
+    Returned instead of None when there aren't enough samples to produce a
+    forecast.  Carries structured context so callers can return informative
+    API responses.
+    """
+
+    container_id: str
+    metric: str
+    status: str = "insufficient_data"
+    min_samples_required: int = MIN_SAMPLES
+    samples_available: int = 0
+
+    def to_dict(self) -> dict:
+        return {
+            "container_id": self.container_id,
+            "metric": self.metric,
+            "status": self.status,
+            "min_samples_required": self.min_samples_required,
+            "samples_available": self.samples_available,
+        }
 
 
 @dataclass
@@ -90,7 +114,7 @@ class MetricsForecaster:
         horizon_hours: int = 24,
         metric: str = "memory_percent",
         lookback_days: int = 7,
-    ) -> Optional[ForecastResult]:
+    ) -> Union[ForecastResult, InsufficientForecastData]:
         """
         Forecast metric value ``horizon_hours`` from now.
 
@@ -101,7 +125,8 @@ class MetricsForecaster:
             lookback_days: Days of historical data to use.
 
         Returns:
-            ForecastResult or None if insufficient data.
+            ForecastResult on success, InsufficientForecastData when there
+            are fewer than MIN_SAMPLES data points.
         """
         minutes = lookback_days * 24 * 60
         samples = await self.storage.get_recent_metrics(container_id, minutes=minutes)
@@ -111,7 +136,12 @@ class MetricsForecaster:
                 f"Insufficient samples for forecast of {container_id}: "
                 f"{len(samples)} < {MIN_SAMPLES}"
             )
-            return None
+            return InsufficientForecastData(
+                container_id=container_id,
+                metric=metric,
+                min_samples_required=MIN_SAMPLES,
+                samples_available=len(samples),
+            )
 
         values = np.array(
             [getattr(s, metric) for s in samples if getattr(s, metric, None) is not None],
@@ -119,7 +149,12 @@ class MetricsForecaster:
         )
 
         if len(values) < MIN_SAMPLES:
-            return None
+            return InsufficientForecastData(
+                container_id=container_id,
+                metric=metric,
+                min_samples_required=MIN_SAMPLES,
+                samples_available=len(values),
+            )
 
         current_value = float(values[-1])
         n = len(values)

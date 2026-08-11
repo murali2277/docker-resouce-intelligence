@@ -1,13 +1,25 @@
 """SQLite storage for metrics and alerts."""
 
 import asyncio
+import json
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from contextlib import asynccontextmanager
 
-from sqlalchemy import create_engine, Column, String, Float, Integer, DateTime, Boolean, Text, event
+from sqlalchemy import (
+    create_engine,
+    Column,
+    String,
+    Float,
+    Integer,
+    DateTime,
+    Boolean,
+    Text,
+    Index,
+    event,
+)
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 import sqlalchemy as sa
 
@@ -24,9 +36,9 @@ class MetricsSample(Base):
     __tablename__ = "metrics_samples"
 
     id = Column(Integer, primary_key=True)
-    container_id = Column(String(12), index=True)
+    container_id = Column(String(12), nullable=False)
     container_name = Column(String(256))
-    timestamp = Column(DateTime, index=True)
+    timestamp = Column(DateTime, nullable=False)
     cpu_percent = Column(Float)
     memory_usage = Column(Integer)
     memory_limit = Column(Integer)
@@ -36,6 +48,14 @@ class MetricsSample(Base):
     block_io_read = Column(Integer)
     block_io_write = Column(Integer)
     pids = Column(Integer)
+
+    # Composite index on the two columns used in every query's WHERE/ORDER BY.
+    # Replaces the previous separate single-column indexes; SQLite can use this
+    # composite index for (container_id,), (container_id, timestamp), and range
+    # scans on timestamp within a given container.
+    __table_args__ = (
+        Index("ix_metrics_samples_cid_ts", "container_id", "timestamp"),
+    )
 
 
 class Container(Base):
@@ -57,6 +77,7 @@ class AlertRecord(Base):
     id = Column(String(36), primary_key=True)
     container_id = Column(String(12), index=True)
     container_name = Column(String(256))
+    # timestamp is indexed for ORDER BY timestamp DESC queries in get_recent_alerts.
     timestamp = Column(DateTime, index=True)
     alert_type = Column(String(20))
     metric = Column(String(50))
@@ -73,12 +94,38 @@ class ActionRecord(Base):
     id = Column(String(36), primary_key=True)
     container_id = Column(String(12), index=True)
     container_name = Column(String(256))
+    # timestamp is indexed for ORDER BY timestamp DESC queries in get_recent_actions.
     timestamp = Column(DateTime, index=True)
     action_type = Column(String(50))
     reason = Column(Text)
     details = Column(Text)  # JSON serialized
     success = Column(Boolean)
     error_message = Column(Text, nullable=True)
+
+
+# ---------------------------------------------------------------------------
+# Background computation cache tables (Item 3)
+# ---------------------------------------------------------------------------
+
+
+class RecommendationCache(Base):
+    """Cached recommendation result per container, written by background worker."""
+    __tablename__ = "recommendation_cache"
+
+    container_id = Column(String(12), primary_key=True)
+    computed_at = Column(DateTime, nullable=False)
+    payload = Column(Text, nullable=False)  # JSON blob
+
+
+class ForecastCache(Base):
+    """Cached forecast result per (container, metric, horizon), written by background worker."""
+    __tablename__ = "forecast_cache"
+
+    container_id = Column(String(12), primary_key=True)
+    metric = Column(String(50), primary_key=True)
+    horizon_hours = Column(Integer, primary_key=True)
+    computed_at = Column(DateTime, nullable=False)
+    payload = Column(Text, nullable=False)  # JSON blob
 
 
 class MetricsStorage:
@@ -108,8 +155,11 @@ class MetricsStorage:
             connect_args=connect_args,
             echo=False,
             # For in-memory, use StaticPool so all sessions share one connection
-            **({"poolclass": __import__('sqlalchemy.pool', fromlist=['StaticPool']).StaticPool}
-               if self._in_memory else {}),
+            **({
+                "poolclass": __import__(
+                    'sqlalchemy.pool', fromlist=['StaticPool']
+                ).StaticPool
+            } if self._in_memory else {}),
         )
 
         # Enable WAL mode for better concurrency (skip for in-memory)
@@ -126,7 +176,7 @@ class MetricsStorage:
 
     async def init(self) -> None:
         """Initialize database schema."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _create_tables() -> None:
             Base.metadata.create_all(self.engine)
@@ -141,14 +191,14 @@ class MetricsStorage:
 
     async def close(self) -> None:
         """Close database connection."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self.engine.dispose)
         logger.info("Storage closed")
 
     @asynccontextmanager
     async def get_session(self):
         """Get async-wrapped database session."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _get_session() -> Session:
             return self.SessionLocal()
@@ -164,7 +214,7 @@ class MetricsStorage:
     async def save_metrics(self, metrics: ContainerMetrics) -> None:
         """Save container metrics sample."""
         async with self.get_session() as session:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
 
             def _save() -> None:
                 sample = MetricsSample(
@@ -194,28 +244,31 @@ class MetricsStorage:
         container_id: str,
         minutes: int = 60,
     ) -> List[MetricsSample]:
-        """Get recent metrics for a container."""
+        """
+        Get recent metrics for a container.
+
+        Returns an empty list when no rows match (normal "no data" case).
+        Raises on genuine storage/query failures so callers can surface a 500.
+        """
         async with self.get_session() as session:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
 
             def _get() -> List[MetricsSample]:
                 cutoff = datetime.utcnow() - timedelta(minutes=minutes)
+                # Uses the composite index ix_metrics_samples_cid_ts
                 return session.query(MetricsSample).filter(
                     MetricsSample.container_id == container_id,
                     MetricsSample.timestamp >= cutoff,
                 ).order_by(MetricsSample.timestamp).all()
 
-            try:
-                results = await loop.run_in_executor(None, _get)
-                return results
-            except Exception as e:
-                logger.error(f"Failed to get metrics: {e}")
-                return []
+            # Let storage errors propagate — callers (routes, aggregator) must
+            # distinguish "no data" (empty list) from "query failed" (exception).
+            return await loop.run_in_executor(None, _get)
 
     async def save_alert(self, alert: Alert) -> None:
         """Save alert record."""
         async with self.get_session() as session:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
 
             def _save() -> None:
                 record = AlertRecord(
@@ -240,10 +293,8 @@ class MetricsStorage:
 
     async def save_action(self, action: Action) -> None:
         """Save action record."""
-        import json
-
         async with self.get_session() as session:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
 
             def _save() -> None:
                 record = ActionRecord(
@@ -265,10 +316,10 @@ class MetricsStorage:
             except Exception as e:
                 logger.error(f"Failed to save action: {e}")
 
-    async def cleanup_old_data(self, retention_hours: int = 24) -> None:
+    async def cleanup_old_data(self, retention_hours: int = 168) -> None:
         """Clean up metrics older than retention period."""
         async with self.get_session() as session:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
 
             def _cleanup() -> int:
                 cutoff = datetime.utcnow() - timedelta(hours=retention_hours)
@@ -290,9 +341,15 @@ class MetricsStorage:
         limit: int = 100,
         offset: int = 0,
     ) -> List[AlertRecord]:
-        """Get recent alerts ordered newest-first."""
+        """
+        Get recent alerts ordered newest-first.
+
+        ORDER BY timestamp DESC uses the index on AlertRecord.timestamp.
+        Returns empty list when no rows match.
+        Raises on genuine storage/query failures.
+        """
         async with self.get_session() as session:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
 
             def _get() -> List[AlertRecord]:
                 return (
@@ -303,21 +360,23 @@ class MetricsStorage:
                     .all()
                 )
 
-            try:
-                results = await loop.run_in_executor(None, _get)
-                return results
-            except Exception as e:
-                logger.error(f"Failed to get alerts: {e}")
-                return []
+            # Propagate storage failures; empty list = valid "no alerts" state.
+            return await loop.run_in_executor(None, _get)
 
     async def get_recent_actions(
         self,
         limit: int = 100,
         offset: int = 0,
     ) -> List[ActionRecord]:
-        """Get recent actions ordered newest-first."""
+        """
+        Get recent actions ordered newest-first.
+
+        ORDER BY timestamp DESC uses the index on ActionRecord.timestamp.
+        Returns empty list when no rows match.
+        Raises on genuine storage/query failures.
+        """
         async with self.get_session() as session:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
 
             def _get() -> List[ActionRecord]:
                 return (
@@ -328,17 +387,13 @@ class MetricsStorage:
                     .all()
                 )
 
-            try:
-                results = await loop.run_in_executor(None, _get)
-                return results
-            except Exception as e:
-                logger.error(f"Failed to get actions: {e}")
-                return []
+            # Propagate storage failures; empty list = valid "no actions" state.
+            return await loop.run_in_executor(None, _get)
 
     async def count_alerts(self) -> int:
         """Return total number of stored alerts."""
         async with self.get_session() as session:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
 
             def _count() -> int:
                 return session.query(AlertRecord).count()
@@ -352,7 +407,7 @@ class MetricsStorage:
     async def count_actions(self) -> int:
         """Return total number of stored actions."""
         async with self.get_session() as session:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
 
             def _count() -> int:
                 return session.query(ActionRecord).count()
@@ -363,3 +418,150 @@ class MetricsStorage:
                 logger.error(f"Failed to count actions: {e}")
                 return 0
 
+    # -----------------------------------------------------------------------
+    # Recommendation / Forecast cache CRUD (Item 3)
+    # -----------------------------------------------------------------------
+
+    async def save_recommendation_cache(
+        self,
+        container_id: str,
+        payload: dict,
+        computed_at: datetime,
+    ) -> None:
+        """Upsert a cached recommendation for a container."""
+        async with self.get_session() as session:
+            loop = asyncio.get_running_loop()
+
+            def _save() -> None:
+                existing = session.query(RecommendationCache).filter_by(
+                    container_id=container_id
+                ).first()
+                if existing:
+                    existing.payload = json.dumps(payload)
+                    existing.computed_at = computed_at
+                else:
+                    session.add(RecommendationCache(
+                        container_id=container_id,
+                        computed_at=computed_at,
+                        payload=json.dumps(payload),
+                    ))
+                session.commit()
+
+            try:
+                await loop.run_in_executor(None, _save)
+            except Exception as e:
+                logger.error(f"Failed to save recommendation cache for {container_id}: {e}")
+
+    async def get_recommendation_cache(
+        self,
+        container_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Return cached recommendation dict (with ``computed_at`` injected) or None.
+        """
+        async with self.get_session() as session:
+            loop = asyncio.get_running_loop()
+
+            def _get() -> Optional[RecommendationCache]:
+                return session.query(RecommendationCache).filter_by(
+                    container_id=container_id
+                ).first()
+
+            try:
+                row = await loop.run_in_executor(None, _get)
+                if row is None:
+                    return None
+                data = json.loads(row.payload)
+                data["computed_at"] = row.computed_at.isoformat()
+                return data
+            except Exception as e:
+                logger.error(f"Failed to get recommendation cache for {container_id}: {e}")
+                return None
+
+    async def get_all_recommendation_caches(self) -> List[Dict[str, Any]]:
+        """Return all cached recommendations (used by the list endpoint)."""
+        async with self.get_session() as session:
+            loop = asyncio.get_running_loop()
+
+            def _get() -> List[RecommendationCache]:
+                return session.query(RecommendationCache).all()
+
+            try:
+                rows = await loop.run_in_executor(None, _get)
+                results = []
+                for row in rows:
+                    data = json.loads(row.payload)
+                    data["computed_at"] = row.computed_at.isoformat()
+                    results.append(data)
+                return results
+            except Exception as e:
+                logger.error(f"Failed to get all recommendation caches: {e}")
+                return []
+
+    async def save_forecast_cache(
+        self,
+        container_id: str,
+        metric: str,
+        horizon_hours: int,
+        payload: dict,
+        computed_at: datetime,
+    ) -> None:
+        """Upsert a cached forecast result."""
+        async with self.get_session() as session:
+            loop = asyncio.get_running_loop()
+
+            def _save() -> None:
+                existing = session.query(ForecastCache).filter_by(
+                    container_id=container_id,
+                    metric=metric,
+                    horizon_hours=horizon_hours,
+                ).first()
+                if existing:
+                    existing.payload = json.dumps(payload)
+                    existing.computed_at = computed_at
+                else:
+                    session.add(ForecastCache(
+                        container_id=container_id,
+                        metric=metric,
+                        horizon_hours=horizon_hours,
+                        computed_at=computed_at,
+                        payload=json.dumps(payload),
+                    ))
+                session.commit()
+
+            try:
+                await loop.run_in_executor(None, _save)
+            except Exception as e:
+                logger.error(
+                    f"Failed to save forecast cache for {container_id}/{metric}: {e}"
+                )
+
+    async def get_forecast_cache(
+        self,
+        container_id: str,
+        metric: str,
+        horizon_hours: int,
+    ) -> Optional[Dict[str, Any]]:
+        """Return cached forecast dict (with ``computed_at`` injected) or None."""
+        async with self.get_session() as session:
+            loop = asyncio.get_running_loop()
+
+            def _get() -> Optional[ForecastCache]:
+                return session.query(ForecastCache).filter_by(
+                    container_id=container_id,
+                    metric=metric,
+                    horizon_hours=horizon_hours,
+                ).first()
+
+            try:
+                row = await loop.run_in_executor(None, _get)
+                if row is None:
+                    return None
+                data = json.loads(row.payload)
+                data["computed_at"] = row.computed_at.isoformat()
+                return data
+            except Exception as e:
+                logger.error(
+                    f"Failed to get forecast cache for {container_id}/{metric}: {e}"
+                )
+                return None

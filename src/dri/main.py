@@ -294,6 +294,12 @@ class DRIAgent:
         except Exception as e:
             logger_module.error(f"Event listener error: {e}")
 
+    async def _recommendation_cache_loop(self) -> None:
+        """Run the background recommendation/forecast cache worker."""
+        if not self.api_server:
+            return
+        await self.api_server.cache_worker.run()
+
     async def run(self) -> None:
         """Run the DRI agent."""
         self.running = True
@@ -314,6 +320,7 @@ class DRIAgent:
                 self._aggregate_metrics_loop(),
                 self._policy_check_loop(),
                 self._event_listener_loop(),
+                self._recommendation_cache_loop(),
             ]
 
             if self.api_server:

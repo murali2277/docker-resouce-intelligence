@@ -62,7 +62,8 @@ class ActionConfig(BaseModel):
 class StorageConfig(BaseModel):
     """Storage backend configuration."""
     sqlite_path: str = "/var/lib/dri/metrics.db"
-    retention_hours: int = 24
+    # Must be >= recommender lookback_days * 24; default matches 7-day lookback.
+    retention_hours: int = 168
     influxdb_enabled: bool = False
     influxdb_url: Optional[str] = None
     influxdb_token: Optional[str] = None
@@ -87,6 +88,9 @@ class DRIConfig(BaseModel):
     collector_interval: int = 5  # seconds
     aggregator_interval: int = 10  # seconds
     policy_check_interval: int = 10  # seconds
+    # How often (seconds) the background worker recomputes and caches
+    # recommendations and forecasts for all known containers.
+    recommendation_cache_interval: int = 3600  # 1 hour
 
     storage: StorageConfig = Field(default_factory=StorageConfig)
     api: APIConfig = Field(default_factory=APIConfig)

@@ -95,7 +95,7 @@ async def test_forecast_flat_usage():
 async def test_forecast_returns_none_on_insufficient_data():
     """forecast() returns None when < MIN_SAMPLES samples exist."""
     from dri.core.storage import MetricsStorage
-    from dri.core.forecaster import MetricsForecaster
+    from dri.core.forecaster import MetricsForecaster, InsufficientForecastData
 
     storage = MetricsStorage(":memory:")
     await storage.init()
@@ -106,7 +106,7 @@ async def test_forecast_returns_none_on_insufficient_data():
     forecaster = MetricsForecaster(storage)
     result = await forecaster.forecast("abc123")
 
-    assert result is None
+    assert isinstance(result, InsufficientForecastData)
 
     await storage.close()
 
@@ -115,7 +115,7 @@ async def test_forecast_returns_none_on_insufficient_data():
 async def test_forecast_returns_none_for_unknown_container():
     """forecast() returns None for a container with no data."""
     from dri.core.storage import MetricsStorage
-    from dri.core.forecaster import MetricsForecaster
+    from dri.core.forecaster import MetricsForecaster, InsufficientForecastData
 
     storage = MetricsStorage(":memory:")
     await storage.init()
@@ -123,7 +123,7 @@ async def test_forecast_returns_none_for_unknown_container():
     forecaster = MetricsForecaster(storage)
     result = await forecaster.forecast("unknownXYZ")
 
-    assert result is None
+    assert isinstance(result, InsufficientForecastData)
 
     await storage.close()
 

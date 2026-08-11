@@ -2,7 +2,8 @@
 
 from datetime import datetime
 from typing import Optional, List, Any
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from prometheus_client import Counter, Histogram
 import time
 
@@ -20,7 +21,9 @@ from .models import (
     HealthCheckResponse,
     RecommendationResponse,
     RecommendationsListResponse,
+    InsufficientDataResponse,
     ForecastResponse,
+    ErrorResponse,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["metrics"])
@@ -145,8 +148,11 @@ async def get_alerts(
         if not storage:
             raise HTTPException(status_code=500, detail="Storage not initialized")
 
-        records = await storage.get_recent_alerts(limit=limit, offset=offset)
-        total = await storage.count_alerts()
+        try:
+            records = await storage.get_recent_alerts(limit=limit, offset=offset)
+            total = await storage.count_alerts()
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Storage error: {exc}") from exc
 
         alert_responses = [
             AlertResponse(
@@ -189,8 +195,11 @@ async def get_action_history(
         if not storage:
             raise HTTPException(status_code=500, detail="Storage not initialized")
 
-        records = await storage.get_recent_actions(limit=limit, offset=offset)
-        total = await storage.count_actions()
+        try:
+            records = await storage.get_recent_actions(limit=limit, offset=offset)
+            total = await storage.count_actions()
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Storage error: {exc}") from exc
 
         action_responses = [
             ActionHistoryResponse(
@@ -251,49 +260,81 @@ async def get_policies() -> PoliciesResponse:
 
 
 # ---------------------------------------------------------------------------
-# Phase 3: Recommendations
+# Phase 3: Recommendations — cache-first, ?force=true for synchronous recompute
 # ---------------------------------------------------------------------------
 
 @router.get("/recommendations", response_model=RecommendationsListResponse)
 async def get_recommendations(
     lookback_days: int = Query(7, ge=1, le=30),
     safety_margin: float = Query(0.20, ge=0.05, le=1.0),
+    force: bool = Query(False, description="Recompute synchronously, bypassing cache"),
 ) -> RecommendationsListResponse:
     """
     Get per-container resource limit recommendations.
 
-    Recommendations are based on p95 CPU and memory usage over the lookback
-    window, plus the specified safety margin.
+    **Normal path**: Results are served from the background cache (updated
+    hourly by default).  Each result includes a ``computed_at`` timestamp
+    so callers can assess freshness.
+
+    **Force recompute**: Add ``?force=true`` to bypass the cache and trigger
+    synchronous recomputation.  Use this for debugging or immediately after
+    a significant workload change.
 
     Query Parameters:
         lookback_days: Days of history to use (default 7, max 30)
         safety_margin: Fractional overhead on top of p95 (default 0.20 = +20%)
+        force: Recompute synchronously (default false)
     """
     metrics_requests.labels(method="GET", endpoint="recommendations").inc()
 
     with metrics_latency.labels(endpoint="recommendations").time():
         if not recommender:
             raise HTTPException(status_code=503, detail="Recommender not initialized")
+        if not storage:
+            raise HTTPException(status_code=503, detail="Storage not initialized")
+
+        # ----------------------------------------------------------------
+        # Cache-first path (default)
+        # ----------------------------------------------------------------
+        if not force:
+            cached = await storage.get_all_recommendation_caches()
+            if cached:
+                recs = []
+                for payload in cached:
+                    try:
+                        recs.append(RecommendationResponse(**payload))
+                    except Exception as e:
+                        # Skip malformed cache entries gracefully
+                        pass
+                return RecommendationsListResponse(
+                    timestamp=datetime.utcnow(),
+                    recommendations=recs,
+                    total_count=len(recs),
+                )
+
+        # ----------------------------------------------------------------
+        # Synchronous recompute path (?force=true or empty cache)
+        # ----------------------------------------------------------------
         if not aggregator:
             raise HTTPException(status_code=503, detail="Aggregator not initialized")
 
-        # Get all known containers from the aggregator's in-memory windows
         container_ids = list(aggregator._windows.keys())
 
-        # Also query storage for any containers not in current windows
-        # (containers that were active historically but not right now)
+        from ..core.recommender import Recommendation, InsufficientDataResult
+
         recs = []
         for cid in container_ids:
             window = aggregator._windows.get(cid)
             cname = window[-1].container_name if window else ""
-            rec = await recommender.compute_recommendation(
+            result = await recommender.compute_recommendation(
                 container_id=cid,
                 container_name=cname,
                 lookback_days=lookback_days,
                 safety_margin=safety_margin,
             )
-            if rec:
-                recs.append(RecommendationResponse(**rec.to_dict()))
+            if isinstance(result, Recommendation):
+                payload = result.to_dict()
+                recs.append(RecommendationResponse(**payload))
 
         return RecommendationsListResponse(
             timestamp=datetime.utcnow(),
@@ -303,7 +344,7 @@ async def get_recommendations(
 
 
 # ---------------------------------------------------------------------------
-# Phase 4: Forecasting
+# Phase 4: Forecasting — cache-first, ?force=true for synchronous recompute
 # ---------------------------------------------------------------------------
 
 @router.get("/forecast/{container_id}", response_model=ForecastResponse)
@@ -311,9 +352,13 @@ async def get_forecast(
     container_id: str,
     horizon_hours: int = Query(24, ge=1, le=168),
     metric: str = Query("memory_percent", pattern="^(cpu_percent|memory_percent)$"),
+    force: bool = Query(False, description="Recompute synchronously, bypassing cache"),
 ) -> ForecastResponse:
     """
     Forecast CPU or memory usage N hours ahead for a container.
+
+    **Normal path**: Served from background cache (updated hourly).
+    **Force recompute**: Add ``?force=true`` to bypass cache.
 
     Path Parameters:
         container_id: Short container ID (12 chars)
@@ -321,12 +366,31 @@ async def get_forecast(
     Query Parameters:
         horizon_hours: How many hours ahead to forecast (default 24, max 168)
         metric: 'cpu_percent' or 'memory_percent' (default memory_percent)
+        force: Recompute synchronously (default false)
     """
     metrics_requests.labels(method="GET", endpoint="forecast").inc()
 
     with metrics_latency.labels(endpoint="forecast").time():
         if not forecaster:
             raise HTTPException(status_code=503, detail="Forecaster not initialized")
+        if not storage:
+            raise HTTPException(status_code=503, detail="Storage not initialized")
+
+        # ----------------------------------------------------------------
+        # Cache-first path
+        # ----------------------------------------------------------------
+        if not force:
+            cached = await storage.get_forecast_cache(container_id, metric, horizon_hours)
+            if cached:
+                try:
+                    return ForecastResponse(**cached)
+                except Exception:
+                    pass  # malformed cache — fall through to recompute
+
+        # ----------------------------------------------------------------
+        # Synchronous recompute
+        # ----------------------------------------------------------------
+        from ..core.forecaster import ForecastResult, InsufficientForecastData
 
         result = await forecaster.forecast(
             container_id=container_id,
@@ -334,7 +398,17 @@ async def get_forecast(
             metric=metric,
         )
 
-        if result is None:
+        if isinstance(result, InsufficientForecastData):
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"Insufficient data for container '{container_id}': "
+                    f"need {result.min_samples_required} samples, "
+                    f"have {result.samples_available}"
+                ),
+            )
+
+        if not isinstance(result, ForecastResult):
             raise HTTPException(
                 status_code=404,
                 detail=f"No forecast data for container '{container_id}' — insufficient history",

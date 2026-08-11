@@ -70,7 +70,7 @@ async def test_recommender_p95_correctness():
 async def test_recommender_returns_none_on_insufficient_data():
     """Recommender should return None when fewer than MIN_SAMPLES exist."""
     from dri.core.storage import MetricsStorage
-    from dri.core.recommender import ResourceRecommender
+    from dri.core.recommender import ResourceRecommender, InsufficientDataResult
 
     storage = MetricsStorage(":memory:")
     await storage.init()
@@ -82,7 +82,7 @@ async def test_recommender_returns_none_on_insufficient_data():
     rec = ResourceRecommender(storage)
     result = await rec.compute_recommendation("abc123", lookback_days=1)
 
-    assert result is None
+    assert isinstance(result, InsufficientDataResult)
 
     await storage.close()
 
@@ -263,5 +263,240 @@ async def test_recommendations_endpoint_with_sufficient_data():
         rec = data["recommendations"][0]
         assert rec["recommended_cpu_pct"] >= rec["p95_cpu"]
         assert rec["recommended_memory_bytes"] >= rec["p95_memory_bytes"]
+
+    await storage.close()
+
+
+# ---------------------------------------------------------------------------
+# Restart-boundary memory leak detection (Item 4)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_memory_leak_restart_boundary():
+    """
+    Memory ramps up, drops sharply (simulated restart), ramps again.
+    Assert the leak slope is computed only from the post-restart segment.
+    """
+    from dri.core.storage import MetricsStorage
+    from dri.core.recommender import ResourceRecommender
+
+    storage = MetricsStorage(":memory:")
+    await storage.init()
+
+    now = datetime.utcnow()
+
+    # Phase 1: ramp up 20% -> 60% over first 3 hours (36 samples, 5 min each)
+    for i in range(36):
+        memory = 20.0 + (40.0 * i / 36)
+        ts = now - timedelta(hours=6) + timedelta(minutes=i * 5)
+        await storage.save_metrics(_make_sample(memory=memory, ts=ts))
+
+    # Simulated restart: sharp drop to 15%
+    restart_ts = now - timedelta(hours=3, minutes=1)
+    await storage.save_metrics(_make_sample(memory=15.0, ts=restart_ts))
+
+    # Phase 2: ramp up 15% -> 55% over next 3 hours (36 samples)
+    for i in range(36):
+        memory = 15.0 + (40.0 * i / 36)
+        ts = now - timedelta(hours=3) + timedelta(minutes=i * 5)
+        await storage.save_metrics(_make_sample(memory=memory, ts=ts))
+
+    rec = ResourceRecommender(storage)
+    is_leak, slope = await rec.detect_memory_leak("abc123", window_hours=6.0)
+
+    assert is_leak, f"Expected leak detected from post-restart segment, slope={slope}"
+    assert slope > 0.5, f"Expected slope > 0.5 %/hr, got {slope}"
+
+    await storage.close()
+
+
+@pytest.mark.asyncio
+async def test_memory_leak_no_false_positive_after_restart_flat_tail():
+    """Ramp, restart, flat tail — should NOT flag a leak."""
+    from dri.core.storage import MetricsStorage
+    from dri.core.recommender import ResourceRecommender
+
+    storage = MetricsStorage(":memory:")
+    await storage.init()
+
+    now = datetime.utcnow()
+    for i in range(36):
+        memory = 20.0 + (40.0 * i / 36)
+        ts = now - timedelta(hours=6) + timedelta(minutes=i * 5)
+        await storage.save_metrics(_make_sample(memory=memory, ts=ts))
+
+    await storage.save_metrics(_make_sample(memory=10.0, ts=now - timedelta(hours=3, minutes=1)))
+
+    for i in range(36):
+        memory = 12.0 + (i % 3) * 0.3
+        ts = now - timedelta(hours=3) + timedelta(minutes=i * 5)
+        await storage.save_metrics(_make_sample(memory=memory, ts=ts))
+
+    rec = ResourceRecommender(storage)
+    is_leak, slope = await rec.detect_memory_leak("abc123", window_hours=6.0)
+
+    assert not is_leak, f"Flat post-restart should not flag a leak, slope={slope}"
+
+    await storage.close()
+
+
+# ---------------------------------------------------------------------------
+# data_completeness field (Item 1)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_recommendation_data_completeness_field():
+    """Recommendation must include a non-empty data_completeness string."""
+    from dri.core.storage import MetricsStorage
+    from dri.core.recommender import ResourceRecommender, Recommendation
+
+    storage = MetricsStorage(":memory:")
+    await storage.init()
+
+    now = datetime.utcnow()
+    for i in range(15):
+        ts = now - timedelta(hours=3) + timedelta(minutes=i * 12)
+        await storage.save_metrics(_make_sample(ts=ts))
+
+    rec = ResourceRecommender(storage)
+    result = await rec.compute_recommendation("abc123", lookback_days=7)
+
+    assert isinstance(result, Recommendation), f"Expected Recommendation, got {type(result)}"
+    assert result.data_completeness, "data_completeness must not be empty"
+    assert "days available" in result.data_completeness
+    assert result.lookback_actual_days < 1.0
+
+    await storage.close()
+
+
+# ---------------------------------------------------------------------------
+# Confidence tiers (Item 5)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_recommendation_confidence_tier_low():
+    """sample_count < 50 -> confidence_tier == 'low'."""
+    from dri.core.storage import MetricsStorage
+    from dri.core.recommender import ResourceRecommender, Recommendation
+
+    storage = MetricsStorage(":memory:")
+    await storage.init()
+
+    now = datetime.utcnow()
+    for i in range(20):
+        await storage.save_metrics(_make_sample(ts=now - timedelta(minutes=20 - i)))
+
+    rec = ResourceRecommender(storage)
+    result = await rec.compute_recommendation("abc123", lookback_days=1)
+
+    assert isinstance(result, Recommendation)
+    assert result.confidence_tier == "low", f"Got '{result.confidence_tier}'"
+
+    await storage.close()
+
+
+@pytest.mark.asyncio
+async def test_recommendation_confidence_tier_medium():
+    """50 <= sample_count < 300 -> confidence_tier == 'medium'."""
+    from dri.core.storage import MetricsStorage
+    from dri.core.recommender import ResourceRecommender, Recommendation
+
+    storage = MetricsStorage(":memory:")
+    await storage.init()
+
+    now = datetime.utcnow()
+    for i in range(100):
+        await storage.save_metrics(_make_sample(cpu=float(20 + i % 30), ts=now - timedelta(minutes=200 - i * 2)))
+
+    rec = ResourceRecommender(storage)
+    result = await rec.compute_recommendation("abc123", lookback_days=1)
+
+    assert isinstance(result, Recommendation)
+    assert result.confidence_tier == "medium", f"Got '{result.confidence_tier}'"
+
+    await storage.close()
+
+
+# ---------------------------------------------------------------------------
+# Structured InsufficientDataResult (Item 6)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_recommendation_insufficient_data_structured():
+    """compute_recommendation returns InsufficientDataResult with structured fields."""
+    from dri.core.storage import MetricsStorage
+    from dri.core.recommender import ResourceRecommender, InsufficientDataResult
+
+    storage = MetricsStorage(":memory:")
+    await storage.init()
+
+    for _ in range(3):
+        await storage.save_metrics(_make_sample())
+
+    rec = ResourceRecommender(storage)
+    result = await rec.compute_recommendation("abc123", "test-container")
+
+    assert isinstance(result, InsufficientDataResult), f"Got {type(result)}"
+    assert result.status == "insufficient_data"
+    assert result.min_samples_required == ResourceRecommender.MIN_SAMPLES
+    assert result.samples_available == 3
+
+    await storage.close()
+
+
+# ---------------------------------------------------------------------------
+# Idle detection / scale-to-zero (Item 5)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_recommendation_idle_detection():
+    """Near-zero CPU and memory -> is_idle=True, idle_recommendation='scale_to_zero'."""
+    from dri.core.storage import MetricsStorage
+    from dri.core.recommender import ResourceRecommender, Recommendation
+
+    storage = MetricsStorage(":memory:")
+    await storage.init()
+
+    now = datetime.utcnow()
+    for i in range(30):
+        ts = now - timedelta(minutes=60 - i * 2)
+        await storage.save_metrics(
+            _make_sample(cpu=0.1, memory=0.3, memory_usage=3 * 1024 * 1024, ts=ts)
+        )
+
+    rec = ResourceRecommender(storage)
+    result = await rec.compute_recommendation("abc123", "test-container", lookback_days=1)
+
+    assert isinstance(result, Recommendation), f"Got {type(result)}"
+    assert result.is_idle, "Expected is_idle=True for near-zero usage"
+    assert result.idle_recommendation == "scale_to_zero"
+
+    await storage.close()
+
+
+@pytest.mark.asyncio
+async def test_recommendation_not_idle_under_load():
+    """Container with real load must not be flagged idle."""
+    from dri.core.storage import MetricsStorage
+    from dri.core.recommender import ResourceRecommender, Recommendation
+
+    storage = MetricsStorage(":memory:")
+    await storage.init()
+
+    now = datetime.utcnow()
+    for i in range(20):
+        await storage.save_metrics(_make_sample(cpu=30.0, memory=50.0, ts=now - timedelta(minutes=40 - i * 2)))
+
+    rec = ResourceRecommender(storage)
+    result = await rec.compute_recommendation("abc123", "test-container", lookback_days=1)
+
+    assert isinstance(result, Recommendation)
+    assert not result.is_idle
+    assert result.idle_recommendation is None
 
     await storage.close()

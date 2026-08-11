@@ -1,11 +1,12 @@
 """FastAPI server for DRI agent HTTP API."""
 
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Optional, Any
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, Response
 from prometheus_client import generate_latest, REGISTRY
-from fastapi.responses import Response
 import asyncio
 import uvicorn
 
@@ -14,6 +15,7 @@ from ..core.storage import MetricsStorage
 from ..core.aggregator import MetricsAggregator
 from ..core.engine import PolicyEngine
 from ..core.recommender import ResourceRecommender
+from ..core.background import RecommendationCacheWorker
 from ..config import DRIConfig
 from . import routes
 
@@ -52,6 +54,15 @@ class DRIAPIServer:
         # Forecaster is imported lazily to avoid hard statsmodels dep
         self.forecaster = self._create_forecaster()
 
+        # Background cache worker (Item 3)
+        self.cache_worker = RecommendationCacheWorker(
+            storage=storage,
+            aggregator=aggregator,
+            recommender=self.recommender,
+            forecaster=self.forecaster,
+            interval_seconds=config.recommendation_cache_interval,
+        )
+
         self.app = self._create_app()
 
     def _create_forecaster(self) -> Any:
@@ -88,6 +99,27 @@ class DRIAPIServer:
             version="0.1.0",
             lifespan=lifespan,
         )
+
+        # ------------------------------------------------------------------
+        # Global exception handler — returns ErrorResponse JSON on any
+        # unhandled exception so clients always get a structured error body
+        # instead of a bare 500 HTML traceback.
+        # ------------------------------------------------------------------
+        @app.exception_handler(Exception)
+        async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+            logger.error(
+                f"Unhandled exception on {request.method} {request.url.path}: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "status_code": 500,
+                    "error": type(exc).__name__,
+                    "message": str(exc),
+                    "timestamp": datetime.utcnow().isoformat(),
+                },
+            )
 
         # CORS middleware
         if self.config.api.enable_cors:
@@ -154,8 +186,7 @@ class DRIAPIServer:
 
         # Run uvicorn in a dedicated thread so its internal event loop
         # doesn't interfere with the agent's asyncio.gather() loop.
-        loop = asyncio.get_event_loop()
-        ready = asyncio.Event()
+        loop = asyncio.get_running_loop()
 
         def _run() -> None:
             import asyncio as _asyncio
@@ -171,7 +202,6 @@ class DRIAPIServer:
         finally:
             server.should_exit = True
             thread.join(timeout=5)
-
 
     def get_app(self) -> FastAPI:
         """Get FastAPI application instance."""
