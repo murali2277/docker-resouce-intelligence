@@ -4,6 +4,7 @@ import Overview from './pages/Overview';
 import Alerts from './pages/Alerts';
 import Recommendations from './pages/Recommendations';
 import Forecast from './pages/Forecast';
+import ActionsHistory from './pages/ActionsHistory';
 
 export default function App() {
   return (
@@ -16,6 +17,7 @@ export default function App() {
             <Route path="/alerts"          element={<Alerts />} />
             <Route path="/recommendations" element={<Recommendations />} />
             <Route path="/forecast"        element={<Forecast />} />
+            <Route path="/actions"         element={<ActionsHistory />} />
           </Routes>
         </main>
       </div>

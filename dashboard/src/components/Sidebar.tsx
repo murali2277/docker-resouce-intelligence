@@ -8,6 +8,7 @@ const NAV = [
   { to: '/alerts',         icon: '🔔', label: 'Alert Feed' },
   { to: '/recommendations',icon: '💡', label: 'Recommendations' },
   { to: '/forecast',       icon: '📈', label: 'Forecast' },
+  { to: '/actions',        icon: '⚙️', label: 'Actions History' },
 ];
 
 export const Sidebar: React.FC = () => {

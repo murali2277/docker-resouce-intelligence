@@ -1,7 +1,8 @@
-import { api } from '../api/client';
+import { useState } from 'react';
+import { api, type ContainerMetrics } from '../api/client';
 import { usePolling } from '../hooks/usePolling';
 import { StatCard, MetricBar, Spinner, ErrorBanner } from '../components/MetricsCard';
-
+import ContainerDetail from './ContainerDetail';
 
 function fmtUptime(s: number): string {
   const d = Math.floor(s / 86400);
@@ -15,12 +16,21 @@ function fmtUptime(s: number): string {
 export default function Overview() {
   const { data: health, loading: hLoad, error: hErr } = usePolling(() => api.health(), 10_000);
   const { data: metrics, loading: mLoad, error: mErr } = usePolling(() => api.metrics(), 10_000);
+  const [selected, setSelected] = useState<ContainerMetrics | null>(null);
 
   const loading = hLoad || mLoad;
   const error = hErr ?? mErr;
 
   return (
     <>
+      {/* Container detail modal — rendered above everything else */}
+      {selected && (
+        <ContainerDetail
+          container={selected}
+          onClose={() => setSelected(null)}
+        />
+      )}
+
       <div className="topbar">
         <div className="topbar-title">System Overview</div>
         <div className="topbar-meta">
@@ -73,15 +83,25 @@ export default function Overview() {
           <>
             <div className="section-header">
               <div className="section-title">Containers</div>
-              <span className="section-count">{metrics.total_count} active</span>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                <span className="section-count">{metrics.total_count} active</span>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  Click a container for details
+                </span>
+              </div>
             </div>
 
             <div className="container-grid">
               {metrics.containers.map(c => (
                 <div
                   key={c.container_id}
+                  id={`container-card-${c.container_id}`}
                   className={`card container-card ${c.is_anomaly ? 'anomaly-glow' : ''}`}
-                  style={{ padding: 20 }}
+                  style={{ padding: 20, cursor: 'pointer' }}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setSelected(c)}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') setSelected(c); }}
                 >
                   <div className="container-name">
                     {c.is_anomaly && <span title={c.anomaly_type ?? ''}>⚠️</span>}
@@ -129,4 +149,3 @@ export default function Overview() {
     </>
   );
 }
-

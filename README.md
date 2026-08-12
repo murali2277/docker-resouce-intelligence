@@ -1,4 +1,4 @@
-﻿# Docker Resource Intelligence (DRI)
+# Docker Resource Intelligence (DRI)
 
 A lightweight, intelligent monitoring and self-healing agent that tracks, restricts, and optimizes container resource consumption on Docker hosts — preventing "noisy neighbors" and Out-Of-Memory (OOM) crashes.
 
@@ -176,7 +176,23 @@ npm install
 npm run dev
 ```
 
-The dashboard opens at **http://localhost:5173**
+The dashboard opens at **http://localhost:5173** and connects to the agent at
+`http://localhost:8000` by default.
+
+**Views:**
+- **Overview** (`/`) — live container metrics table, poll 10s; click any row for a detail modal with 60m trend + recommendation + forecast
+- **Alert Feed** (`/alerts`) — sortable alerts table, poll 10s
+- **Recommendations** (`/recommendations`) — p95-based resource limit recommendations with confidence tier, poll 60s
+- **Forecast** (`/forecast`) — on-demand CPU/memory forecast chart
+- **Actions History** (`/actions`) — automated throttle/isolate/restart log, poll 15s
+
+To point the dashboard at a non-localhost agent:
+
+```bash
+VITE_API_BASE=http://192.168.1.10:8000 npm run dev
+```
+
+> See [`dashboard/README.md`](dashboard/README.md) for full instructions.
 
 ---
 

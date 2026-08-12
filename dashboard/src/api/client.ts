@@ -97,9 +97,15 @@ export interface Recommendation {
   p95_memory_pct: number;
   sample_count: number;
   lookback_days: number;
+  lookback_actual_days: number;
   safety_margin: number;
+  data_completeness?: string;
+  confidence_tier: string;   // "low" | "medium" | "high"
   is_memory_leak: boolean;
   memory_leak_slope_pct_per_hour: number;
+  is_idle: boolean;
+  idle_recommendation?: string;
+  computed_at?: string;
 }
 
 export interface RecommendationsData {
@@ -119,6 +125,7 @@ export interface ForecastData {
   predicted_at: string;
   method_used: string;
   sample_count: number;
+  computed_at?: string;
 }
 
 // ── API Functions ──────────────────────────────────────────────────────────

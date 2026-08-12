@@ -8,6 +8,11 @@ function fmtBytes(b: number): string {
   return `${b} B`;
 }
 
+function confidenceBadge(tier: string): string {
+  const m: Record<string, string> = { high: 'badge-success', medium: 'badge-info', low: 'badge-warning' };
+  return m[tier] ?? 'badge-neutral';
+}
+
 function RecRow({ rec }: { rec: Recommendation }) {
   return (
     <tr>
@@ -37,6 +42,17 @@ function RecRow({ rec }: { rec: Recommendation }) {
         </span>
       </td>
       <td>
+        {/* Confidence tier */}
+        <span className={`badge ${confidenceBadge(rec.confidence_tier)}`}>
+          {rec.confidence_tier}
+        </span>
+        <br />
+        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+          {rec.sample_count.toLocaleString()} samples
+        </span>
+      </td>
+      <td>
+        {/* Memory trend + idle */}
         {rec.is_memory_leak ? (
           <span className="badge badge-critical">
             📈 Leak +{rec.memory_leak_slope_pct_per_hour.toFixed(2)}%/hr
@@ -44,11 +60,30 @@ function RecRow({ rec }: { rec: Recommendation }) {
         ) : (
           <span className="badge badge-success">✓ Stable</span>
         )}
+        {rec.is_idle && (
+          <div style={{ marginTop: 4 }}>
+            <span className="badge badge-neutral">
+              😴 {rec.idle_recommendation ?? 'Idle'}
+            </span>
+          </div>
+        )}
       </td>
       <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-        {rec.sample_count.toLocaleString()} samples
-        <br />
         {rec.lookback_days}d · +{Math.round(rec.safety_margin * 100)}% margin
+        {rec.data_completeness && (
+          <>
+            <br />
+            <span style={{ fontSize: 11 }}>{rec.data_completeness}</span>
+          </>
+        )}
+        {rec.computed_at && (
+          <>
+            <br />
+            <span style={{ fontSize: 11 }}>
+              cached {new Date(rec.computed_at).toLocaleTimeString()}
+            </span>
+          </>
+        )}
       </td>
     </tr>
   );
@@ -87,6 +122,8 @@ export default function Recommendations() {
             >
               💡 Recommended limits are computed from <strong>p95 usage over the last 7 days</strong>{' '}
               plus a <strong>+20% safety margin</strong>. Memory leak detection uses 6-hour linear regression.
+              Results are served from the background cache (refreshed hourly); click{' '}
+              <strong>Forecast</strong> for per-container projections.
             </div>
 
             <div className="section-header">
@@ -112,6 +149,7 @@ export default function Recommendations() {
                         <th>Container</th>
                         <th>CPU Limit</th>
                         <th>Memory Limit</th>
+                        <th>Confidence</th>
                         <th>Memory Trend</th>
                         <th>Data</th>
                       </tr>
@@ -131,4 +169,3 @@ export default function Recommendations() {
     </>
   );
 }
-

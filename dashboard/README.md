@@ -1,32 +1,63 @@
-# React + TypeScript + Vite
+# DRI Dashboard
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React + Vite + TypeScript single-page app for the Docker Resource Intelligence agent.
 
-Currently, two official plugins are available:
+## Prerequisites
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- Node.js v18+ and npm v9+
+- A running DRI agent (default: `http://localhost:8000`)
 
-## React Compiler
+## Running locally
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+# From the repo root:
+cd dashboard
+npm install
+npm run dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+The dev server starts at **http://localhost:5173** and proxies nothing — all
+`/api/v1/*` requests go directly to `http://localhost:8000` (the DRI agent).
+
+If the agent runs on a different host/port, set the env variable before starting:
+
+```bash
+VITE_API_BASE=http://192.168.1.10:8000 npm run dev
+```
+
+## Building for production
+
+```bash
+npm run build
+# Output: dashboard/dist/
+```
+
+Serve `dist/` with any static file server (nginx, `npx serve dist`, etc.).
+Point `VITE_API_BASE` to the DRI agent's public URL at build time.
+
+## Views
+
+| URL | Source | Data source |
+|-----|--------|-------------|
+| `/` | Overview.tsx | `GET /api/v1/metrics` + `GET /api/v1/health` — polls every 10s |
+| `/alerts` | Alerts.tsx | `GET /api/v1/alerts` — polls every 10s, sortable by column |
+| `/recommendations` | Recommendations.tsx | `GET /api/v1/recommendations` — polls every 60s |
+| `/forecast` | Forecast.tsx | `GET /api/v1/forecast/{id}` — on-demand |
+| `/actions` | ActionsHistory.tsx | `GET /api/v1/actions/history` — polls every 15s |
+
+Clicking any container card on the Overview page opens a detail modal with:
+- 60-minute moving-average trend charts (CPU + memory, via recharts)
+- The container's cached recommendation (filtered client-side by `container_id`)
+- A 24h memory forecast
+
+## API field names
+
+`dashboard/src/api/client.ts` mirrors every field from `src/dri/api/models.py`
+**exactly as named** — no renaming. If the backend adds or renames a field,
+update `client.ts` first.
+
+## Note on Docker deployment
+
+Wiring the dashboard build into the Python Docker image / docker-compose is a
+separate follow-up task. Do **not** modify `Dockerfile` or `docker-compose.yml`
+to add the dashboard until that phase is scoped.
