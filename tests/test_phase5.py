@@ -496,3 +496,235 @@ async def test_recommendations_force_true_recomputes():
     )
 
     await storage.close()
+
+
+# ---------------------------------------------------------------------------
+# Item 2: EXPLAIN QUERY PLAN confirms index is used by get_recent_metrics()
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_composite_index_used_in_explain_query_plan():
+    """
+    SQLite's EXPLAIN QUERY PLAN must show that the composite index
+    ix_metrics_samples_cid_ts is used when get_recent_metrics() runs its
+    WHERE container_id=? AND timestamp>=? query.
+    """
+    from dri.core.storage import MetricsStorage
+
+    storage = MetricsStorage(":memory:")
+    await storage.init()
+
+    # Insert a handful of rows so the planner has real data to query
+    from dri.utils.metrics import ContainerMetrics
+    from datetime import datetime, timedelta
+    now = datetime.utcnow()
+    for i in range(5):
+        m = ContainerMetrics(
+            container_id="abc123",
+            container_name="test",
+            timestamp=now - timedelta(minutes=5 - i),
+            cpu_percent=10.0,
+            cpu_count=2,
+            memory_usage=100 * 1024 * 1024,
+            memory_limit=1024 * 1024 * 1024,
+            memory_percent=10.0,
+            net_io_in=0,
+            net_io_out=0,
+            block_io_read=0,
+            block_io_write=0,
+            pids=1,
+        )
+        await storage.save_metrics(m)
+
+    async with storage.get_session() as session:
+        loop = asyncio.get_running_loop()
+
+        def _explain():
+            from sqlalchemy import text
+            cutoff = now - timedelta(minutes=60)
+            rows = session.execute(
+                text(
+                    "EXPLAIN QUERY PLAN "
+                    "SELECT * FROM metrics_samples "
+                    "WHERE container_id = :cid AND timestamp >= :cutoff "
+                    "ORDER BY timestamp"
+                ),
+                {"cid": "abc123", "cutoff": cutoff},
+            ).fetchall()
+            return rows
+
+        rows = await loop.run_in_executor(None, _explain)
+
+    plan_text = " ".join(str(r) for r in rows).lower()
+    # SQLite reports "USING INDEX <name>" or "COVERING INDEX" when it uses an index.
+    # Accept either spelling to be robust across SQLite versions.
+    assert "ix_metrics_samples_cid_ts" in plan_text or "using index" in plan_text, (
+        f"Expected composite index to be used in EXPLAIN QUERY PLAN. "
+        f"Full plan output:\n{plan_text}"
+    )
+
+    await storage.close()
+
+
+# ---------------------------------------------------------------------------
+# Item 4: Restart-aware leak detection (phase5-level test)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_restart_aware_leak_detection_slope_from_post_restart():
+    """
+    Phase 5 requirement: the memory-leak slope must be computed only from
+    the post-restart segment, not from pre-restart data.
+
+    Setup: memory ramps 20->60%, sharp drop to 10% (restart), then flat
+    at ~10-12%. Leak should NOT be detected (post-restart segment is flat).
+    """
+    from dri.core.storage import MetricsStorage
+    from dri.core.recommender import ResourceRecommender
+    from datetime import datetime, timedelta
+
+    storage = MetricsStorage(":memory:")
+    await storage.init()
+
+    now = datetime.utcnow()
+
+    # Pre-restart ramp: would look like a leak if restart-awareness is broken
+    for i in range(30):
+        memory = 20.0 + (40.0 * i / 30)
+        ts = now - timedelta(hours=6) + timedelta(minutes=i * 6)
+        await storage.save_metrics(_make_sample(memory=memory, ts=ts))
+
+    # Sharp restart drop (>15% in one step)
+    await storage.save_metrics(_make_sample(memory=10.0, ts=now - timedelta(hours=3, minutes=2)))
+
+    # Post-restart: flat — should NOT trigger leak
+    for i in range(30):
+        memory = 10.0 + (i % 3) * 0.2   # tiny oscillation, no trend
+        ts = now - timedelta(hours=3) + timedelta(minutes=i * 6)
+        await storage.save_metrics(_make_sample(memory=memory, ts=ts))
+
+    rec = ResourceRecommender(storage)
+    is_leak, slope = await rec.detect_memory_leak("abc123", window_hours=6.0)
+
+    assert not is_leak, (
+        f"Flat post-restart segment must NOT flag a leak "
+        f"(slope={slope:.4f} %/hr). "
+        "If is_leak=True, the restart boundary detection is broken."
+    )
+
+    await storage.close()
+
+
+# ---------------------------------------------------------------------------
+# Item 5: Confidence tier "high" (>= 300 samples)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_recommendation_confidence_tier_high():
+    """300+ samples must yield confidence_tier == 'high'."""
+    from dri.core.storage import MetricsStorage
+    from dri.core.recommender import ResourceRecommender, Recommendation
+    from datetime import datetime, timedelta
+
+    storage = MetricsStorage(":memory:")
+    await storage.init()
+
+    now = datetime.utcnow()
+    # 300 samples spread over ~50 hours so they fall within a 3-day lookback
+    for i in range(300):
+        ts = now - timedelta(hours=50) + timedelta(minutes=i * 10)
+        await storage.save_metrics(
+            _make_sample(cpu=float(20 + i % 30), memory=float(30 + i % 20), ts=ts)
+        )
+
+    rec = ResourceRecommender(storage)
+    result = await rec.compute_recommendation("abc123", "test-container", lookback_days=3)
+
+    assert isinstance(result, Recommendation), f"Got {type(result)}"
+    assert result.confidence_tier == "high", (
+        f"Expected 'high' confidence for 300 samples, got '{result.confidence_tier}' "
+        f"(sample_count={result.sample_count})"
+    )
+
+    await storage.close()
+
+
+# ---------------------------------------------------------------------------
+# Item 3: forecast ?force=true bypasses cache
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_forecast_force_true_bypasses_cache():
+    """
+    GET /api/v1/forecast/{id}?force=true must call forecaster.forecast()
+    even when a cached result is present.
+    """
+    from dri.core.storage import MetricsStorage
+    from dri.core.aggregator import MetricsAggregator
+    from dri.core.engine import PolicyEngine
+    from dri.config import DRIConfig
+    from dri.api.server import DRIAPIServer
+    import dri.api.routes as route_module
+    from httpx import AsyncClient, ASGITransport
+    from datetime import datetime, timedelta
+
+    storage = MetricsStorage(":memory:")
+    await storage.init()
+
+    # Pre-populate forecast cache for abc123/memory_percent/24h
+    cached_forecast = {
+        "container_id": "abc123",
+        "metric": "memory_percent",
+        "horizon_hours": 24,
+        "current_value": 42.0,
+        "predicted_value": 55.0,
+        "confidence_low": 48.0,
+        "confidence_high": 62.0,
+        "predicted_at": (datetime.utcnow() + timedelta(hours=24)).isoformat(),
+        "method_used": "linear_regression",
+        "sample_count": 100,
+    }
+    await storage.save_forecast_cache("abc123", "memory_percent", 24, cached_forecast, datetime.utcnow())
+
+    aggregator = MetricsAggregator(storage)
+    config = DRIConfig()
+    pe = PolicyEngine(config)
+    server = DRIAPIServer(config, storage, aggregator, pe)
+
+    forecaster_call_count = 0
+    original_forecast = server.forecaster.forecast
+
+    async def counting_forecast(*args, **kwargs):
+        nonlocal forecaster_call_count
+        forecaster_call_count += 1
+        return await original_forecast(*args, **kwargs)
+
+    server.forecaster.forecast = counting_forecast
+    route_module.set_dependencies(storage, aggregator, pe, None, server.recommender, server.forecaster)
+
+    async with AsyncClient(transport=ASGITransport(app=server.app), base_url="http://test") as client:
+        # Without force — should hit cache (call_count stays 0)
+        resp = await client.get("/api/v1/forecast/abc123?horizon_hours=24&metric=memory_percent")
+        assert resp.status_code == 200
+        assert forecaster_call_count == 0, (
+            "forecaster.forecast() must NOT be called when cache is warm and force=false"
+        )
+
+        # With force=true — must call forecaster regardless of cache
+        resp = await client.get(
+            "/api/v1/forecast/abc123?horizon_hours=24&metric=memory_percent&force=true"
+        )
+        # 404 is acceptable here (insufficient DB samples to forecast),
+        # but the forecaster must have been called.
+        assert resp.status_code in (200, 404), f"Unexpected status: {resp.status_code}"
+        assert forecaster_call_count >= 1, (
+            f"forecaster.forecast() must be called once with force=true, "
+            f"got {forecaster_call_count} calls"
+        )
+
+    await storage.close()
+

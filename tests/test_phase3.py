@@ -500,3 +500,91 @@ async def test_recommendation_not_idle_under_load():
     assert result.idle_recommendation is None
 
     await storage.close()
+
+
+# ---------------------------------------------------------------------------
+# Edge cases (Item 7 — extend test_phase3.py)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_recommender_empty_storage():
+    """Empty DB (zero samples) must return InsufficientDataResult, not crash."""
+    from dri.core.storage import MetricsStorage
+    from dri.core.recommender import ResourceRecommender, InsufficientDataResult
+
+    storage = MetricsStorage(":memory:")
+    await storage.init()
+
+    rec = ResourceRecommender(storage)
+    result = await rec.compute_recommendation("abc123", "test-container", lookback_days=7)
+
+    assert isinstance(result, InsufficientDataResult), (
+        f"Expected InsufficientDataResult for empty DB, got {type(result)}"
+    )
+    assert result.samples_available == 0
+    assert result.min_samples_required == ResourceRecommender.MIN_SAMPLES
+
+    await storage.close()
+
+
+@pytest.mark.asyncio
+async def test_recommender_single_sample():
+    """Exactly one sample must return InsufficientDataResult, not crash."""
+    from dri.core.storage import MetricsStorage
+    from dri.core.recommender import ResourceRecommender, InsufficientDataResult
+
+    storage = MetricsStorage(":memory:")
+    await storage.init()
+
+    now = datetime.utcnow()
+    await storage.save_metrics(_make_sample(cpu=50.0, memory=60.0, ts=now - timedelta(minutes=1)))
+
+    rec = ResourceRecommender(storage)
+    result = await rec.compute_recommendation("abc123", "test-container", lookback_days=7)
+
+    assert isinstance(result, InsufficientDataResult), (
+        f"Expected InsufficientDataResult for 1-sample container, got {type(result)}"
+    )
+    assert result.samples_available == 1
+
+    await storage.close()
+
+
+@pytest.mark.asyncio
+async def test_recommender_all_zero_metrics():
+    """
+    All-zero CPU and memory (e.g. a paused container) must produce a valid
+    Recommendation with p95_cpu==0 and recommended_cpu_pct==0, not crash or
+    return InsufficientDataResult.
+    """
+    from dri.core.storage import MetricsStorage
+    from dri.core.recommender import ResourceRecommender, Recommendation
+
+    storage = MetricsStorage(":memory:")
+    await storage.init()
+
+    now = datetime.utcnow()
+    # MIN_SAMPLES (10) + a few extra, all at zero usage
+    for i in range(15):
+        await storage.save_metrics(
+            _make_sample(
+                cpu=0.0,
+                memory=0.0,
+                memory_usage=0,
+                ts=now - timedelta(minutes=15 - i),
+            )
+        )
+
+    rec = ResourceRecommender(storage)
+    result = await rec.compute_recommendation("abc123", "test-container", lookback_days=1)
+
+    assert isinstance(result, Recommendation), (
+        f"Expected Recommendation for all-zero metrics, got {type(result)}"
+    )
+    assert result.p95_cpu == 0.0, f"p95_cpu should be 0, got {result.p95_cpu}"
+    assert result.recommended_cpu_pct == 0.0
+    assert result.is_idle, "All-zero usage should be flagged idle"
+    assert result.idle_recommendation == "scale_to_zero"
+
+    await storage.close()
