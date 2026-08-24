@@ -128,6 +128,27 @@ export interface ForecastData {
   computed_at?: string;
 }
 
+export interface PolicyRule {
+  metric: string;
+  operator: string;
+  value: number;
+  duration_seconds: number;
+  action: string;
+}
+
+export interface Policy {
+  name: string;
+  enabled: boolean;
+  selector: Record<string, string>;
+  rules: PolicyRule[];
+}
+
+export interface PoliciesData {
+  timestamp: string;
+  policies: Policy[];
+  total_count: number;
+}
+
 // ── API Functions ──────────────────────────────────────────────────────────
 
 export const api = {
@@ -142,4 +163,6 @@ export const api = {
     get<RecommendationsData>('/api/v1/recommendations', { lookback_days, safety_margin }),
   forecast: (container_id: string, horizon_hours = 24, metric = 'memory_percent') =>
     get<ForecastData>(`/api/v1/forecast/${container_id}`, { horizon_hours, metric }),
+  policies: () =>
+    get<PoliciesData>('/api/v1/policies'),
 };

@@ -1,5 +1,6 @@
 import { api, type Recommendation } from '../api/client';
 import { usePolling } from '../hooks/usePolling';
+import { usePollingInterval } from '../hooks/PollingContext';
 import { Spinner, ErrorBanner } from '../components/MetricsCard';
 
 function fmtBytes(b: number): string {
@@ -90,14 +91,17 @@ function RecRow({ rec }: { rec: Recommendation }) {
 }
 
 export default function Recommendations() {
-  const { data, loading, error } = usePolling(() => api.recommendations(), 60_000);
+  const { intervalMs } = usePollingInterval();
+  // Recommendations are cache-based; use 6× base interval (minimum 60s)
+  const recInterval = Math.max(60_000, intervalMs * 6);
+  const { data, loading, error } = usePolling(() => api.recommendations(), recInterval);
 
   return (
     <>
       <div className="topbar">
         <div className="topbar-title">Resource Recommendations</div>
         <div className="topbar-meta">
-          <div className="refresh-badge">🔄 1 min refresh</div>
+          <div className="refresh-badge">🔄 {(recInterval / 1000).toFixed(0)}s refresh</div>
           {data && <span>{data.total_count} containers</span>}
         </div>
       </div>

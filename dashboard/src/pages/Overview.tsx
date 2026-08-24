@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api, type ContainerMetrics } from '../api/client';
 import { usePolling } from '../hooks/usePolling';
+import { usePollingInterval } from '../hooks/PollingContext';
 import { StatCard, MetricBar, Spinner, ErrorBanner } from '../components/MetricsCard';
 import ContainerDetail from './ContainerDetail';
 
@@ -14,8 +15,9 @@ function fmtUptime(s: number): string {
 }
 
 export default function Overview() {
-  const { data: health, loading: hLoad, error: hErr } = usePolling(() => api.health(), 10_000);
-  const { data: metrics, loading: mLoad, error: mErr } = usePolling(() => api.metrics(), 10_000);
+  const { intervalMs } = usePollingInterval();
+  const { data: health, loading: hLoad, error: hErr } = usePolling(() => api.health(), intervalMs);
+  const { data: metrics, loading: mLoad, error: mErr } = usePolling(() => api.metrics(), intervalMs);
   const [selected, setSelected] = useState<ContainerMetrics | null>(null);
 
   const loading = hLoad || mLoad;
@@ -34,7 +36,7 @@ export default function Overview() {
       <div className="topbar">
         <div className="topbar-title">System Overview</div>
         <div className="topbar-meta">
-          <div className="refresh-badge">🔄 Live · 10s</div>
+          <div className="refresh-badge">🔄 Live · {(intervalMs / 1000).toFixed(0)}s</div>
           {health && <span>{new Date(health.timestamp).toLocaleTimeString()}</span>}
         </div>
       </div>

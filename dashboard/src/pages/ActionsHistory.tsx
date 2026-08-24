@@ -1,5 +1,6 @@
 import { api, type ActionRecord } from '../api/client';
 import { usePolling } from '../hooks/usePolling';
+import { usePollingInterval } from '../hooks/PollingContext';
 import { Spinner, ErrorBanner } from '../components/MetricsCard';
 
 const ACTION_META: Record<string, { cls: string; icon: string }> = {
@@ -57,14 +58,15 @@ function ActionRow({ action }: { action: ActionRecord }) {
 }
 
 export default function ActionsHistory() {
-  const { data, loading, error } = usePolling(() => api.actions(200), 15_000);
+  const { intervalMs } = usePollingInterval();
+  const { data, loading, error } = usePolling(() => api.actions(200), intervalMs);
 
   return (
     <>
       <div className="topbar">
         <div className="topbar-title">Actions History</div>
         <div className="topbar-meta">
-          <div className="refresh-badge">🔄 15s refresh</div>
+          <div className="refresh-badge">🔄 {(intervalMs / 1000).toFixed(0)}s refresh</div>
           {data && <span>{data.total_count} total actions</span>}
         </div>
       </div>

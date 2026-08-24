@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { api } from '../api/client';
 import { usePolling } from '../hooks/usePolling';
+import { usePollingInterval } from '../hooks/PollingContext';
 import { AlertRow } from '../components/AlertBadge';
 import { Spinner, ErrorBanner } from '../components/MetricsCard';
 
@@ -27,7 +28,8 @@ function SortButton({ label, sortKey, current, dir, onSort }: {
 }
 
 export default function Alerts() {
-  const { data, loading, error } = usePolling(() => api.alerts(200), 10_000);
+  const { intervalMs } = usePollingInterval();
+  const { data, loading, error } = usePolling(() => api.alerts(200), intervalMs);
   const [sortKey, setSortKey] = useState<SortKey>('timestamp');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
 
@@ -58,7 +60,7 @@ export default function Alerts() {
       <div className="topbar">
         <div className="topbar-title">Alert Feed</div>
         <div className="topbar-meta">
-          <div className="refresh-badge">🔄 Live · 10s</div>
+          <div className="refresh-badge">🔄 Live · {(intervalMs / 1000).toFixed(0)}s</div>
           {data && <span>{data.total_count} total</span>}
         </div>
       </div>

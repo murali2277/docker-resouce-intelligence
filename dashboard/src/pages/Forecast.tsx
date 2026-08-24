@@ -5,6 +5,7 @@ import {
 } from 'recharts';
 import { api, type ForecastData, type ContainerMetrics } from '../api/client';
 import { usePolling } from '../hooks/usePolling';
+import { usePollingInterval } from '../hooks/PollingContext';
 import { Spinner, ErrorBanner } from '../components/MetricsCard';
 
 const HORIZON_OPTIONS = [6, 12, 24, 48, 72, 168];
@@ -51,7 +52,8 @@ export default function Forecast() {
   const [forecastLoading, setForecastLoading] = useState(false);
   const [forecastError, setForecastError] = useState<string | null>(null);
 
-  const { data: metrics } = usePolling(() => api.metrics(), 15_000);
+  const { intervalMs } = usePollingInterval();
+  const { data: metrics } = usePolling(() => api.metrics(), intervalMs);
 
   const containers = metrics?.containers ?? [];
 
