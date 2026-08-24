@@ -11,7 +11,7 @@ import asyncio
 import uvicorn
 
 from ..utils.logger import get_logger
-from ..core.storage import MetricsStorage
+from ..core.storage_base import StorageBackend
 from ..core.aggregator import MetricsAggregator
 from ..core.engine import PolicyEngine
 from ..core.recommender import ResourceRecommender
@@ -28,7 +28,7 @@ class DRIAPIServer:
     def __init__(
         self,
         config: DRIConfig,
-        storage: MetricsStorage,
+        storage: StorageBackend,
         aggregator: MetricsAggregator,
         policy_engine: PolicyEngine,
         agent: Optional[Any] = None,

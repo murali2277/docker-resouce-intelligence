@@ -30,6 +30,13 @@ storage:
   influxdb_org: "dri"
   influxdb_bucket: "metrics"
 
+  # TimescaleDB (optional — Phase 6 spike)
+  # Activate with: docker compose --profile timescale up
+  # Then flip this flag and provide a connection URL.
+  # Requires asyncpg:  pip install "docker-resource-intelligence[timescaledb]"
+  timescaledb_enabled: false
+  # timescaledb_url: "postgresql://dri:secret@timescaledb:5432/dri"
+
 api:
   host: "0.0.0.0"
   port: 8000

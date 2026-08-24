@@ -49,6 +49,7 @@ dev = [
 perf = ["uvloop>=0.19.0"]
 influxdb = ["influxdb-client>=1.18.0"]
 forecasting = ["statsmodels>=0.14.0"]
+timescaledb = ["asyncpg>=0.29.0"]
 
 [project.urls]
 Homepage = "https://github.com/murali2277/docker-resouce-intelligence"

@@ -8,7 +8,8 @@ import statistics
 
 from ..utils.logger import get_logger
 from ..utils.metrics import ContainerMetrics, AggregatedMetrics
-from .storage import MetricsStorage, MetricsSample
+from .storage import MetricsSample
+from .storage_base import StorageBackend
 from .recommender import z_score_anomaly
 
 logger = get_logger("aggregator")
@@ -17,12 +18,12 @@ logger = get_logger("aggregator")
 class MetricsAggregator:
     """Calculate moving averages and detect anomalies."""
 
-    def __init__(self, storage: MetricsStorage):
+    def __init__(self, storage: StorageBackend):
         """
         Initialize aggregator.
 
         Args:
-            storage: MetricsStorage instance for data persistence
+            storage: StorageBackend instance for data persistence
         """
         self.storage = storage
         self._windows: Dict[str, deque] = {}  # Container ID -> metrics deque

@@ -15,7 +15,7 @@ from typing import Optional, Literal, Union
 import numpy as np
 
 from ..utils.logger import get_logger
-from .storage import MetricsStorage
+from .storage_base import StorageBackend
 
 logger = get_logger("forecaster")
 
@@ -105,7 +105,7 @@ class MetricsForecaster:
     Both methods compute confidence intervals as ±1.5 × residual RMSE.
     """
 
-    def __init__(self, storage: MetricsStorage) -> None:
+    def __init__(self, storage: StorageBackend) -> None:
         self.storage = storage
 
     async def forecast(

@@ -42,6 +42,7 @@ def _make_sample(
 
 
 @pytest.mark.asyncio
+@pytest.mark.sqlite_only
 async def test_composite_index_exists_on_metrics_samples():
     """
     After init(), the metrics_samples table must have a composite index that

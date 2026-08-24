@@ -64,11 +64,21 @@ class StorageConfig(BaseModel):
     sqlite_path: str = "/var/lib/dri/metrics.db"
     # Must be >= recommender lookback_days * 24; default matches 7-day lookback.
     retention_hours: int = 168
+
+    # InfluxDB (legacy optional integration)
     influxdb_enabled: bool = False
     influxdb_url: Optional[str] = None
     influxdb_token: Optional[str] = None
     influxdb_org: Optional[str] = None
     influxdb_bucket: Optional[str] = None
+
+    # TimescaleDB (optional alternative backend — Phase 6 spike)
+    # Enable by setting timescaledb_enabled: true and providing a DSN.
+    # Requires: pip install "docker-resource-intelligence[timescaledb]"
+    #
+    # Example DSN: "postgresql://dri:secret@timescaledb:5432/dri"
+    timescaledb_enabled: bool = False
+    timescaledb_url: Optional[str] = None
 
 
 class APIConfig(BaseModel):

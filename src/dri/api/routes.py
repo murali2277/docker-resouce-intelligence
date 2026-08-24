@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from prometheus_client import Counter, Histogram
 import time
 
-from ..core.storage import MetricsStorage
+from ..core.storage_base import StorageBackend
 from ..core.aggregator import MetricsAggregator
 from ..core.engine import PolicyEngine
 from .models import (
@@ -41,7 +41,7 @@ metrics_latency = Histogram(
 )
 
 # References (will be injected by server)
-storage: Optional[MetricsStorage] = None
+storage: Optional[StorageBackend] = None
 aggregator: Optional[MetricsAggregator] = None
 policy_engine: Optional[PolicyEngine] = None
 agent: Optional[Any] = None         # DRIAgent reference for live counters
@@ -51,7 +51,7 @@ start_time: float = time.time()
 
 
 def set_dependencies(
-    s: MetricsStorage,
+    s: StorageBackend,
     a: MetricsAggregator,
     pe: PolicyEngine,
     ag: Optional[Any] = None,

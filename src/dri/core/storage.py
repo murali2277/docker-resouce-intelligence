@@ -1,4 +1,4 @@
-"""SQLite storage for metrics and alerts."""
+"""SQLite storage backend for DRI metrics, alerts, actions, and caches."""
 
 import asyncio
 import json
@@ -25,6 +25,7 @@ import sqlalchemy as sa
 
 from ..utils.logger import get_logger
 from ..utils.metrics import ContainerMetrics, AggregatedMetrics, Alert, Action
+from .storage_base import StorageBackend
 
 logger = get_logger("storage")
 
@@ -128,7 +129,7 @@ class ForecastCache(Base):
     payload = Column(Text, nullable=False)  # JSON blob
 
 
-class MetricsStorage:
+class SqliteStorage(StorageBackend):
     """SQLite storage backend for metrics and alerts."""
 
     def __init__(self, db_path: str = "metrics.db"):
@@ -565,3 +566,13 @@ class MetricsStorage:
                     f"Failed to get forecast cache for {container_id}/{metric}: {e}"
                 )
                 return None
+
+
+# ---------------------------------------------------------------------------
+# Backward-compatibility alias
+# ---------------------------------------------------------------------------
+
+#: ``MetricsStorage`` is kept as a public alias for ``SqliteStorage`` so that
+#: all existing import sites (tests, main.py, etc.) continue to work without
+#: any changes.  New code should prefer importing ``SqliteStorage`` directly.
+MetricsStorage = SqliteStorage

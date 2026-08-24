@@ -13,7 +13,7 @@ from typing import Optional, List, Union
 import numpy as np
 
 from ..utils.logger import get_logger
-from .storage import MetricsStorage
+from .storage_base import StorageBackend
 
 logger = get_logger("recommender")
 
@@ -133,7 +133,7 @@ class ResourceRecommender:
     IDLE_CPU_THRESHOLD = 1.0        # percent
     IDLE_MEMORY_THRESHOLD = 1.0     # percent
 
-    def __init__(self, storage: MetricsStorage) -> None:
+    def __init__(self, storage: StorageBackend) -> None:
         self.storage = storage
 
     async def compute_recommendation(

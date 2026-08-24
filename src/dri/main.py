@@ -7,9 +7,10 @@ from datetime import datetime
 from typing import Optional
 import docker
 
-from .config import DRIConfig, load_config, watch_config
+from .config import DRIConfig, load_config, watch_config, StorageConfig
 from .core.collector import DockerStatsCollector
 from .core.storage import MetricsStorage
+from .core.storage_base import StorageBackend
 from .core.aggregator import MetricsAggregator
 from .core.engine import PolicyEngine
 from .events.listener import DockerEventListener
@@ -22,6 +23,32 @@ from .utils.metrics import Action
 from .utils.webhooks import WebhookDispatcher
 
 logger_module = get_logger("main")
+
+
+def _create_storage(cfg: StorageConfig) -> StorageBackend:
+    """Storage factory: returns the backend selected by config.
+
+    Selection logic:
+      1. TimescaleDB if ``timescaledb_enabled=true`` AND a DSN is provided.
+      2. SQLite (default) otherwise.
+
+    No calling code changes are required when switching backends — both
+    implement :class:`StorageBackend` and expose an identical async interface.
+    """
+    if cfg.timescaledb_enabled and cfg.timescaledb_url:
+        from .core.storage_timescale import TimescaleStorage  # lazy import
+        logger_module.info(
+            f"Storage backend: TimescaleDB ({cfg.timescaledb_url!r})"
+        )
+        return TimescaleStorage(
+            dsn=cfg.timescaledb_url,
+            retention_hours=cfg.retention_hours,
+        )
+
+    logger_module.info(
+        f"Storage backend: SQLite ({cfg.sqlite_path!r})"
+    )
+    return MetricsStorage(cfg.sqlite_path)
 
 
 class DRIAgent:
@@ -40,7 +67,7 @@ class DRIAgent:
         # Initialize components
         self.docker_client: Optional[docker.DockerClient] = None
         self.collector: Optional[DockerStatsCollector] = None
-        self.storage: Optional[MetricsStorage] = None
+        self.storage: Optional[StorageBackend] = None
         self.aggregator: Optional[MetricsAggregator] = None
         self.policy_engine: Optional[PolicyEngine] = None
         self.event_listener: Optional[DockerEventListener] = None
@@ -66,8 +93,8 @@ class DRIAgent:
             self.docker_client = docker.from_env()
             logger_module.info("Connected to Docker daemon")
 
-            # Storage
-            self.storage = MetricsStorage(self.config.storage.sqlite_path)
+            # Storage — backend determined by config flag
+            self.storage = _create_storage(self.config.storage)
             await self.storage.init()
 
             # Aggregator

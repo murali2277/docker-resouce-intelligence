@@ -42,9 +42,45 @@ services:
     depends_on:
       - dri-agent
 
+  # ---------------------------------------------------------------------------
+  # Optional: TimescaleDB (time-series Postgres extension)
+  #
+  # Activate with:  docker compose --profile timescale up
+  #
+  # Then update config/config.yaml:
+  #   storage:
+  #     timescaledb_enabled: true
+  #     timescaledb_url: "postgresql://dri:secret@timescaledb:5432/dri"
+  #
+  # Also install asyncpg in the DRI container:
+  #   pip install "docker-resource-intelligence[timescaledb]"
+  # ---------------------------------------------------------------------------
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    profiles: ["timescale"]
+    container_name: dri-timescaledb
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dri
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: dri
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescaledb-data:/var/lib/postgresql/data
+    networks:
+      - dri-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dri -d dri"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
 volumes:
   dri-data:
   prometheus-data:
+  timescaledb-data:
 
 networks:
   dri-network:
