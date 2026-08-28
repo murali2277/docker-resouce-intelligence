@@ -3,8 +3,12 @@
 import asyncio
 import pytest
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from dri.utils.metrics import ContainerMetrics
 
 # ---------------------------------------------------------------------------
 # Config validators
@@ -60,7 +64,7 @@ def _make_metrics(container_id: str = "abc123", cpu: float = 10.0) -> "Container
     return ContainerMetrics(
         container_id=container_id,
         container_name="test-container",
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
         cpu_percent=cpu,
         cpu_count=2,
         memory_usage=100 * 1024 * 1024,
@@ -121,7 +125,7 @@ async def test_storage_get_recent_alerts_returns_data():
             alert_id=f"alert-{i}",
             container_id="abc123",
             container_name="test",
-            timestamp=datetime.utcnow() + timedelta(seconds=i),
+            timestamp=datetime.now(timezone.utc) + timedelta(seconds=i),
             alert_type="warning",
             metric="cpu",
             current_value=float(80 + i),
@@ -167,7 +171,7 @@ async def test_storage_get_recent_actions_returns_data():
             action_id=f"action-{i}",
             container_id="abc123",
             container_name="test",
-            timestamp=datetime.utcnow() + timedelta(seconds=i),
+            timestamp=datetime.now(timezone.utc) + timedelta(seconds=i),
             action_type="throttle",
             reason=f"Reason {i}",
             details={"cpu_quota": 50000},
@@ -197,7 +201,7 @@ async def test_storage_get_recent_alerts_pagination():
             alert_id=f"alert-{i}",
             container_id="abc123",
             container_name="test",
-            timestamp=datetime.utcnow() + timedelta(seconds=i),
+            timestamp=datetime.now(timezone.utc) + timedelta(seconds=i),
             alert_type="warning",
             metric="cpu",
             current_value=float(80 + i),
@@ -250,3 +254,90 @@ def test_storage_uses_orm_declarative_base():
         "declarative_base must not be imported from sqlalchemy.ext.declarative"
     )
     assert "sqlalchemy.orm" in source and "declarative_base" in source
+
+
+# ---------------------------------------------------------------------------
+# Collector _parse_stats CPU calculation
+# ---------------------------------------------------------------------------
+
+
+def test_collector_parse_stats_cpu_calculation():
+    """_parse_stats calculates CPU percent using deltas correctly."""
+    from dri.core.collector import DockerStatsCollector
+    from unittest.mock import MagicMock
+
+    collector = DockerStatsCollector()
+    container_mock = MagicMock()
+    container_mock.id = "abc123def456"
+    container_mock.name = "test_container"
+
+    # Test normal calculation
+    stats_data = {
+        "cpu_stats": {
+            "cpu_usage": {"total_usage": 1500},
+            "system_cpu_usage": 3000,
+            "online_cpus": 2,
+        },
+        "precpu_stats": {
+            "cpu_usage": {"total_usage": 1000},
+            "system_cpu_usage": 2000,
+        },
+        "memory_stats": {"usage": 1024, "limit": 2048},
+        "networks": {},
+        "blkio_stats": {},
+        "pids_stats": {"current": 5},
+    }
+    metrics = collector._parse_stats(container_mock, stats_data)
+    # delta_cpu = 500, delta_system = 1000, cpus = 2
+    # cpu_percent = (500 / 1000) * 2 * 100 = 100.0
+    assert metrics is not None
+    assert metrics.cpu_percent == 100.0
+    assert metrics.cpu_count == 2
+
+    # Test first sample (precpu_stats is empty/zeroed)
+    stats_data_first = {
+        "cpu_stats": {
+            "cpu_usage": {"total_usage": 1500},
+            "system_cpu_usage": 3000,
+            "online_cpus": 2,
+        },
+        "precpu_stats": {
+            "cpu_usage": {"total_usage": 0},
+            "system_cpu_usage": 0,
+        },
+        "memory_stats": {"usage": 1024, "limit": 2048},
+    }
+    metrics_first = collector._parse_stats(container_mock, stats_data_first)
+    assert metrics_first is not None
+    assert metrics_first.cpu_percent == 0.0
+
+    # Test missing precpu_stats
+    stats_data_missing = {
+        "cpu_stats": {
+            "cpu_usage": {"total_usage": 1500},
+            "system_cpu_usage": 3000,
+            "online_cpus": 2,
+        },
+        "memory_stats": {"usage": 1024, "limit": 2048},
+    }
+    metrics_missing = collector._parse_stats(container_mock, stats_data_missing)
+    assert metrics_missing is not None
+    assert metrics_missing.cpu_percent == 0.0
+
+    # Test negative delta (e.g. daemon restart)
+    stats_data_negative = {
+        "cpu_stats": {
+            "cpu_usage": {"total_usage": 1500},
+            "system_cpu_usage": 3000,
+            "online_cpus": 2,
+        },
+        "precpu_stats": {
+            "cpu_usage": {"total_usage": 2000},
+            "system_cpu_usage": 4000,
+        },
+        "memory_stats": {"usage": 1024, "limit": 2048},
+    }
+    metrics_negative = collector._parse_stats(container_mock, stats_data_negative)
+    assert metrics_negative is not None
+    assert metrics_negative.cpu_percent == 0.0
+

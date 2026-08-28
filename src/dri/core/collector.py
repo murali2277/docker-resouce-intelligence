@@ -2,8 +2,8 @@
 
 import asyncio
 import json
-from datetime import datetime
-from typing import AsyncIterator, Optional, Dict, Any, List
+from datetime import datetime, timezone
+from typing import AsyncIterator, Optional, Dict, Any, List, cast
 import docker
 from docker.models.containers import Container
 
@@ -82,7 +82,7 @@ class DockerStatsCollector:
         def _get_stats() -> Dict[str, Any]:
             try:
                 stats = container.stats(stream=False)
-                return stats
+                return cast(Dict[str, Any], stats)
             except Exception as e:
                 logger.debug(f"Failed to collect stats for {container.name}: {e}")
                 return {}
@@ -108,13 +108,28 @@ class DockerStatsCollector:
         """Parse Docker stats response into ContainerMetrics."""
         try:
             # CPU calculation
-            cpu_delta = stats.get("cpu_stats", {}).get("cpu_usage", {}).get("total_usage", 0)
-            system_delta = stats.get("cpu_stats", {}).get("system_cpu_usage", 0)
-            cpu_count = len(stats.get("cpu_stats", {}).get("cpus", []))
+            cpu_stats = stats.get("cpu_stats", {})
+            precpu_stats = stats.get("precpu_stats", {})
+
+            cpu_usage = cpu_stats.get("cpu_usage", {})
+            precpu_usage = precpu_stats.get("cpu_usage", {})
+
+            current_cpu = cpu_usage.get("total_usage", 0)
+            previous_cpu = precpu_usage.get("total_usage", 0)
+
+            current_system = cpu_stats.get("system_cpu_usage", 0)
+            previous_system = precpu_stats.get("system_cpu_usage", 0)
+
+            cpu_count = cpu_stats.get("online_cpus") or len(cpu_usage.get("percpu_usage", []) or [1])
 
             cpu_percent = 0.0
-            if system_delta > 0 and cpu_count > 0:
-                cpu_percent = (cpu_delta / system_delta) * cpu_count * 100.0
+            if previous_system > 0:
+                cpu_delta = current_cpu - previous_cpu
+                system_delta = current_system - previous_system
+
+                if system_delta > 0 and cpu_delta >= 0:
+                    cpu_percent = (cpu_delta / system_delta) * cpu_count * 100.0
+
 
             # Memory calculation
             memory_usage = stats.get("memory_stats", {}).get("usage", 0)
@@ -138,9 +153,9 @@ class DockerStatsCollector:
             pids = stats.get("pids_stats", {}).get("current", 0)
 
             return ContainerMetrics(
-                container_id=container.id[:12],
-                container_name=container.name,
-                timestamp=datetime.utcnow(),
+                container_id=(container.id or "")[:12],
+                container_name=container.name or "unknown",
+                timestamp=datetime.now(timezone.utc),
                 cpu_percent=round(cpu_percent, 2),
                 cpu_count=cpu_count,
                 memory_usage=memory_usage,
