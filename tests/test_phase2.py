@@ -2,22 +2,26 @@
 
 import asyncio
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from typing import Optional, TYPE_CHECKING
 from unittest.mock import MagicMock, AsyncMock
+
+if TYPE_CHECKING:
+    from dri.utils.metrics import ContainerMetrics
 
 
 def _make_metrics(
     container_id: str = "abc123",
     cpu: float = 10.0,
     memory: float = 30.0,
-    ts: datetime = None,
+    ts: Optional[datetime] = None,
 ) -> "ContainerMetrics":
     from dri.utils.metrics import ContainerMetrics
 
     return ContainerMetrics(
         container_id=container_id,
         container_name="test-container",
-        timestamp=ts or datetime.utcnow(),
+        timestamp=ts or datetime.now(timezone.utc),
         cpu_percent=cpu,
         cpu_count=2,
         memory_usage=300 * 1024 * 1024,
@@ -46,7 +50,7 @@ async def test_hybrid_fast_path_uses_deque():
     await storage.init()
     agg = MetricsAggregator(storage)
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     # Add samples spanning 10 minutes — more than enough for a 5m window
     for i in range(10):
         m = _make_metrics(cpu=float(20 + i), ts=now - timedelta(minutes=9 - i))
@@ -84,7 +88,7 @@ async def test_hybrid_fallback_uses_db():
     await storage.init()
 
     # Pre-populate DB with 70 minutes of data
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     for i in range(70):
         m = _make_metrics(
             cpu=float(10 + i % 10),
@@ -117,7 +121,7 @@ async def test_hybrid_merge_deduplicates_by_timestamp():
     storage = MetricsStorage(":memory:")
     await storage.init()
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     shared_ts = now - timedelta(minutes=5)
 
     # Save to DB
@@ -152,7 +156,7 @@ async def test_60m_average_falls_back_to_db():
     storage = MetricsStorage(":memory:")
     await storage.init()
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     # Insert 60 minutes of DB data — CPU = 80%
     for i in range(60):
@@ -194,7 +198,7 @@ async def test_aggregate_returns_aggregated_metrics():
     await storage.init()
 
     agg = MetricsAggregator(storage)
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     for i in range(10):
         m = _make_metrics(cpu=float(25 + i), memory=float(40 + i), ts=now - timedelta(minutes=9 - i))
@@ -209,3 +213,85 @@ async def test_aggregate_returns_aggregated_metrics():
     assert 0.0 <= result.memory_percent_5m <= 100.0
 
     await storage.close()
+
+
+# ---------------------------------------------------------------------------
+# Policy Engine evaluate with missing / aliased metrics
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_policy_engine_memory_growth_rate_5m_triggers_alert():
+    """Test that a policy using 'memory_growth_rate_5m' correctly maps and triggers."""
+    from dri.core.engine import PolicyEngine
+    from dri.config import DRIConfig, ContainerPolicy, ThresholdRule
+    from dri.utils.metrics import AggregatedMetrics
+    from datetime import datetime, timezone
+
+    rule = ThresholdRule(metric="memory_growth_rate_5m", operator=">", value=20.0, duration_seconds=0, action="warning")
+    policy = ContainerPolicy(name="test", enabled=True, selector={"image": "*"}, rules=[rule])
+    config = DRIConfig(global_policy=policy)
+    engine = PolicyEngine(config)
+
+    metrics = AggregatedMetrics(
+        container_id="test1",
+        container_name="test_container",
+        timestamp=datetime.now(timezone.utc),
+        cpu_percent=0.0,
+        cpu_percent_5m=0.0,
+        cpu_percent_15m=0.0,
+        cpu_percent_60m=0.0,
+        memory_percent=0.0,
+        memory_percent_5m=0.0,
+        memory_percent_15m=0.0,
+        memory_percent_60m=0.0,
+        memory_growth_rate_1m=0.0,
+        memory_growth_rate_5m=25.0
+    )
+
+    # Evaluate twice to allow violation tracker to register and then trigger
+    await engine.evaluate(metrics)
+    alerts = await engine.evaluate(metrics)
+    
+    assert alerts is not None, "Alerts should be generated"
+    assert len(alerts) == 1
+    assert alerts[0].metric == "memory_growth_rate_5m"
+    assert alerts[0].current_value == 25.0
+
+
+@pytest.mark.asyncio
+async def test_policy_engine_typo_metric_logs_warning(caplog):
+    """Test that a typo in metric name produces a logged warning once."""
+    from dri.core.engine import PolicyEngine
+    from dri.config import DRIConfig, ContainerPolicy, ThresholdRule
+    from dri.utils.metrics import AggregatedMetrics
+    from datetime import datetime, timezone
+
+    rule = ThresholdRule(metric="typo_metric", operator=">", value=20.0, duration_seconds=0, action="warning")
+    policy = ContainerPolicy(name="test", enabled=True, selector={"image": "*"}, rules=[rule])
+    config = DRIConfig(global_policy=policy)
+    engine = PolicyEngine(config)
+
+    metrics = AggregatedMetrics(
+        container_id="test1",
+        container_name="test_container",
+        timestamp=datetime.now(timezone.utc),
+        cpu_percent=0.0,
+        cpu_percent_5m=0.0,
+        cpu_percent_15m=0.0,
+        cpu_percent_60m=0.0,
+        memory_percent=0.0,
+        memory_percent_5m=0.0,
+        memory_percent_15m=0.0,
+        memory_percent_60m=0.0,
+        memory_growth_rate_1m=0.0,
+        memory_growth_rate_5m=0.0
+    )
+
+    # Evaluate multiple times
+    await engine.evaluate(metrics)
+    await engine.evaluate(metrics)
+
+    warnings = [r.message for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1
+    assert "Unknown metric 'typo_metric'" in warnings[0]
+

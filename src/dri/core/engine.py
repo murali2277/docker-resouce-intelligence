@@ -3,7 +3,7 @@
 import asyncio
 import uuid
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Callable, Any
 
 from ..config import DRIConfig, ThresholdRule
@@ -11,6 +11,33 @@ from ..utils.logger import get_logger
 from ..utils.metrics import AggregatedMetrics, Alert
 
 logger = get_logger("engine")
+
+_warned_metrics = set()
+
+def _resolve_metric_value(metric_name: str, metrics: AggregatedMetrics) -> float:
+    """Resolve metric name to its value, logging a warning if unknown."""
+    metric_map = {
+        "cpu": metrics.cpu_percent,
+        "cpu_5m": metrics.cpu_percent_5m,
+        "cpu_15m": metrics.cpu_percent_15m,
+        "cpu_60m": metrics.cpu_percent_60m,
+        "memory": metrics.memory_percent,
+        "memory_5m": metrics.memory_percent_5m,
+        "memory_15m": metrics.memory_percent_15m,
+        "memory_60m": metrics.memory_percent_60m,
+        "growth_rate_1m": metrics.memory_growth_rate_1m,
+        "memory_growth_rate_1m": metrics.memory_growth_rate_1m,
+        "growth_rate_5m": metrics.memory_growth_rate_5m,
+        "memory_growth_rate_5m": metrics.memory_growth_rate_5m,
+    }
+    
+    if metric_name not in metric_map:
+        if metric_name not in _warned_metrics:
+            logger.warning(f"Unknown metric '{metric_name}' in policy rule")
+            _warned_metrics.add(metric_name)
+        return 0.0
+        
+    return metric_map[metric_name]
 
 
 class PolicyEngine:
@@ -57,20 +84,7 @@ class PolicyEngine:
         Returns:
             True if threshold breached
         """
-        metric_map = {
-            "cpu": metrics.cpu_percent,
-            "cpu_5m": metrics.cpu_percent_5m,
-            "cpu_15m": metrics.cpu_percent_15m,
-            "cpu_60m": metrics.cpu_percent_60m,
-            "memory": metrics.memory_percent,
-            "memory_5m": metrics.memory_percent_5m,
-            "memory_15m": metrics.memory_percent_15m,
-            "memory_60m": metrics.memory_percent_60m,
-            "growth_rate_1m": metrics.memory_growth_rate_1m,
-            "growth_rate_5m": metrics.memory_growth_rate_5m,
-        }
-
-        current_value = metric_map.get(rule.metric, 0.0)
+        current_value = _resolve_metric_value(rule.metric, metrics)
 
         if rule.operator == ">":
             return current_value > rule.value
@@ -88,7 +102,7 @@ class PolicyEngine:
     async def evaluate(
         self,
         metrics: AggregatedMetrics,
-    ) -> Optional[Alert]:
+    ) -> Optional[List[Alert]]:
         """
         Evaluate policies against metrics.
 
@@ -121,10 +135,10 @@ class PolicyEngine:
                     # Track violation duration
                     violation_key = f"{metrics.container_id}:{rule.metric}"
                     if violation_key not in self._violation_tracker[metrics.container_id]:
-                        self._violation_tracker[metrics.container_id][violation_key] = datetime.utcnow()
+                        self._violation_tracker[metrics.container_id][violation_key] = datetime.now(timezone.utc)
                     else:
                         violation_start = self._violation_tracker[metrics.container_id][violation_key]
-                        violation_duration = (datetime.utcnow() - violation_start).total_seconds()
+                        violation_duration = (datetime.now(timezone.utc) - violation_start).total_seconds()
 
                         # Only trigger if violation duration exceeds rule threshold
                         if violation_duration >= rule.duration_seconds:
@@ -132,7 +146,7 @@ class PolicyEngine:
                                 alert_id=str(uuid.uuid4()),
                                 container_id=metrics.container_id,
                                 container_name=metrics.container_name,
-                                timestamp=datetime.utcnow(),
+                                timestamp=datetime.now(timezone.utc),
                                 alert_type=rule.action,
                                 metric=rule.metric,
                                 current_value=self._get_metric_value(rule.metric, metrics),
@@ -151,19 +165,7 @@ class PolicyEngine:
 
     def _get_metric_value(self, metric: str, metrics: AggregatedMetrics) -> float:
         """Get metric value by name."""
-        metric_map = {
-            "cpu": metrics.cpu_percent,
-            "cpu_5m": metrics.cpu_percent_5m,
-            "cpu_15m": metrics.cpu_percent_15m,
-            "cpu_60m": metrics.cpu_percent_60m,
-            "memory": metrics.memory_percent,
-            "memory_5m": metrics.memory_percent_5m,
-            "memory_15m": metrics.memory_percent_15m,
-            "memory_60m": metrics.memory_percent_60m,
-            "growth_rate_1m": metrics.memory_growth_rate_1m,
-            "growth_rate_5m": metrics.memory_growth_rate_5m,
-        }
-        return metric_map.get(metric, 0.0)
+        return _resolve_metric_value(metric, metrics)
 
     def update_config(self, config: DRIConfig) -> None:
         """Hot-reload policy configuration."""
