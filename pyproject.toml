@@ -75,4 +75,7 @@ disallow_incomplete_defs = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "-v --strict-markers"
+addopts = "-v"
+markers = [
+    "asyncio: mark test as asyncio",
+]
