@@ -29,13 +29,13 @@ def _create_storage(cfg: StorageConfig) -> StorageBackend:
     """Storage factory: returns the backend selected by config.
 
     Selection logic:
-      1. TimescaleDB if ``timescaledb_enabled=true`` AND a DSN is provided.
+      1. TimescaleDB if ``backend == 'timescaledb'`` AND a DSN is provided.
       2. SQLite (default) otherwise.
 
     No calling code changes are required when switching backends — both
     implement :class:`StorageBackend` and expose an identical async interface.
     """
-    if cfg.timescaledb_enabled and cfg.timescaledb_url:
+    if cfg.backend == "timescaledb" and cfg.timescaledb_url:
         from .core.storage_timescale import TimescaleStorage  # lazy import
         logger_module.info(
             f"Storage backend: TimescaleDB ({cfg.timescaledb_url!r})"

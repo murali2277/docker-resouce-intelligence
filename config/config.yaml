@@ -30,11 +30,11 @@ storage:
   influxdb_org: "dri"
   influxdb_bucket: "metrics"
 
-  # TimescaleDB (optional — Phase 6 spike)
+  # TimescaleDB (optional alternative backend — Phase 6 spike)
   # Activate with: docker compose --profile timescale up
-  # Then flip this flag and provide a connection URL.
+  # Then set backend to "timescaledb" and provide a connection URL.
   # Requires asyncpg:  pip install "docker-resource-intelligence[timescaledb]"
-  timescaledb_enabled: false
+  backend: "sqlite"
   # timescaledb_url: "postgresql://dri:secret@timescaledb:5432/dri"
 
 api:
