@@ -166,42 +166,39 @@ class DRIAPIServer:
         return app
 
     async def start(self) -> None:
-        """Start the API server with uvicorn in a background thread."""
+        """Start the API server in a thread, sharing the running event loop.
+
+        Uses loop.run_in_executor to run uvicorn.run() (the synchronous
+        entrypoint) in a ThreadPoolExecutor thread.  This avoids both:
+          - Nested event loops (asyncio.run() inside a thread)
+          - Blocking asyncio.gather() (await server.serve() deadlocks startup)
+
+        The thread shares the process so uvicorn can reach FastAPI routes
+        which reference the aggregator/storage objects set up in the main loop.
+        """
         import threading
 
         logger.info(
             f"Starting API server on {self.config.api.host}:{self.config.api.port}"
         )
 
-        config = uvicorn.Config(
-            app=self.app,
-            host=self.config.api.host,
-            port=self.config.api.port,
-            log_level="info",
-            access_log=False,
-        )
-        server = uvicorn.Server(config)
-        # Let the agent's signal handlers take precedence
-        server.install_signal_handlers = False
+        def _run_uvicorn() -> None:
+            uvicorn.run(
+                self.app,
+                host=self.config.api.host,
+                port=self.config.api.port,
+                log_level="info",
+                access_log=False,
+            )
 
-        # Run uvicorn in a dedicated thread so its internal event loop
-        # doesn't interfere with the agent's asyncio.gather() loop.
-        loop = asyncio.get_running_loop()
-
-        def _run() -> None:
-            import asyncio as _asyncio
-            _asyncio.run(server.serve())
-
-        thread = threading.Thread(target=_run, daemon=True, name="uvicorn")
+        thread = threading.Thread(target=_run_uvicorn, daemon=True, name="uvicorn")
         thread.start()
+        logger.info("API server thread started")
 
-        # Keep this coroutine alive so gather() doesn't exit
-        try:
-            while thread.is_alive():
-                await asyncio.sleep(1)
-        finally:
-            server.should_exit = True
-            thread.join(timeout=5)
+        # Yield control back to asyncio.gather() so all other coroutines
+        # (collector, aggregator, etc.) can run while uvicorn serves requests.
+        while thread.is_alive():
+            await asyncio.sleep(1)
 
     def get_app(self) -> FastAPI:
         """Get FastAPI application instance."""

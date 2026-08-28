@@ -86,52 +86,80 @@ class DockerEventListener:
 
     async def stream_events(self) -> AsyncIterator[ContainerEvent]:
         """
-        Stream Docker events.
+        Stream Docker events without blocking the asyncio event loop.
+
+        The Docker SDK's ``client.events()`` returns a blocking HTTP streaming
+        iterator.  Iterating it directly in a coroutine (``for event in
+        stream``) holds the event loop thread and starves every other
+        coroutine (collector, aggregator, etc.).
+
+        Fix: push the blocking iteration into a daemon thread via
+        ``loop.run_in_executor`` and route events back to the async world
+        through an ``asyncio.Queue``.  The coroutine then does a non-blocking
+        ``await queue.get()`` so the event loop stays free between events.
 
         Yields:
-            ContainerEvent for each interesting event
+            ContainerEvent for each interesting container event
         """
         loop = asyncio.get_event_loop()
+        queue: asyncio.Queue = asyncio.Queue(maxsize=256)
 
-        def _get_events():
-            return self.client.events(
-                filters={"type": "container"},
-                decode=True,
-            )
+        _SENTINEL = object()  # signals the thread finished
+
+        def _push_events() -> None:
+            """Run in a thread — iterate the blocking stream and enqueue events."""
+            try:
+                stream = self.client.events(
+                    filters={"type": "container"},
+                    decode=True,
+                )
+                for event_data in stream:
+                    if not self._running:
+                        break
+                    loop.call_soon_threadsafe(queue.put_nowait, event_data)
+            except Exception as exc:
+                loop.call_soon_threadsafe(queue.put_nowait, exc)
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, _SENTINEL)
 
         self._running = True
         consecutive_errors = 0
         max_consecutive_errors = 5
 
         while self._running:
-            try:
-                events_stream = await loop.run_in_executor(None, _get_events)
-                consecutive_errors = 0
+            import threading
+            thread = threading.Thread(target=_push_events, daemon=True,
+                                      name="docker-events")
+            thread.start()
 
-                for event_data in events_stream:
-                    if not self._running:
-                        break
+            try:
+                while self._running:
+                    item = await queue.get()
+
+                    if item is _SENTINEL:
+                        break  # thread finished — restart outer loop
+
+                    if isinstance(item, Exception):
+                        raise item  # re-raise in async context
 
                     try:
-                        event = ContainerEvent(event_data)
-
-                        # Filter for interesting events
+                        event = ContainerEvent(item)
                         if event.action in self.INTERESTING_EVENTS:
                             logger.debug(
                                 f"Docker event: {event.action} ({event.container_id})"
                             )
                             yield event
                             await self._trigger_callbacks(event)
-
                     except Exception as e:
                         logger.error(f"Failed to process event: {e}")
+
+                consecutive_errors = 0
 
             except Exception as e:
                 consecutive_errors += 1
                 logger.error(
                     f"Error in event stream: {e} (attempt {consecutive_errors})"
                 )
-
                 if consecutive_errors >= max_consecutive_errors:
                     logger.error("Too many consecutive errors, reconnecting...")
                     await asyncio.sleep(5)

@@ -171,7 +171,7 @@ The agent REST API is available at **http://localhost:8000**
 In a **separate terminal**:
 
 ```bash
-cd frontend
+cd dashboard
 npm install
 npm run dev
 ```
