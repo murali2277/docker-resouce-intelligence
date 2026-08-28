@@ -6,7 +6,7 @@ aggregator_interval: 10        # seconds
 policy_check_interval: 10      # seconds
 
 storage:
-  sqlite_path: "/var/lib/dri/metrics.db"
+  sqlite_path: "metrics.db"
 
   # retention_hours controls how long raw metric samples are kept in SQLite.
   #

@@ -166,35 +166,32 @@ The agent REST API is available at **http://localhost:8000**
 
 ---
 
-### 5 — Run the dashboard (optional)
+### 5 — Run the frontend dashboard
 
 In a **separate terminal**:
 
 ```bash
-cd dashboard
+cd frontend
 npm install
 npm run dev
 ```
 
-The dashboard opens at **http://localhost:5173** and connects to the agent at
-`http://localhost:8000` by default.
+The frontend dashboard opens at **http://localhost:5173** and automatically proxies requests to the backend API at `http://localhost:8000`.
 
-**Views:**
-- **Overview** (`/`) — live container metrics table, poll 10s; click any row for a detail modal with 60m trend + recommendation + forecast
-- **Alert Feed** (`/alerts`) — sortable alerts table, poll 10s
-- **Recommendations** (`/recommendations`) — p95-based resource limit recommendations with confidence tier, poll 60s
-- **Forecast** (`/forecast`) — on-demand CPU/memory forecast chart
-- **Actions History** (`/actions`) — automated throttle/isolate/restart log, poll 15s
+**Four Polling Views:**
+- **Metrics** — live container metrics (`/api/v1/metrics`), polling interval 5–10s
+- **Alerts** — active and acknowledged alert feed (`/api/v1/alerts`), polling interval 5–10s
+- **Action History** — automated action log (`/api/v1/actions/history`), polling interval 5–10s
+- **Policies** — active global & container policy rules (`/api/v1/policies`), polling interval 5–10s
 
-To point the dashboard at a non-localhost agent:
+To point the dashboard at a custom backend URL, set `VITE_API_BASE`:
 
 ```bash
 VITE_API_BASE=http://192.168.1.10:8000 npm run dev
 ```
 
-> See [`dashboard/README.md`](dashboard/README.md) for full instructions.
-
 ---
+
 
 ## Full Docker Deployment
 
