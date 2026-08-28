@@ -32,6 +32,7 @@ class MetricsResponse(BaseModel):
     block_io_read: int = 0
     block_io_write: int = 0
     pids: int = 0
+    restart_count: int = 0
 
 
 class ContainerMetricsListResponse(BaseModel):
@@ -78,6 +79,24 @@ class ActionHistoryListResponse(BaseModel):
     """List of action history."""
     timestamp: datetime
     actions: List[ActionHistoryResponse]
+    total_count: int
+
+
+class EventResponse(BaseModel):
+    """Docker event response."""
+    id: str
+    container_id: str
+    container_name: str
+    event_type: str
+    action: str
+    timestamp: datetime
+    attributes: Dict[str, Any] = Field(default_factory=dict)
+
+
+class EventsResponse(BaseModel):
+    """List of Docker events."""
+    timestamp: datetime
+    events: List[EventResponse]
     total_count: int
 
 

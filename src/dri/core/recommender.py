@@ -7,10 +7,36 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Union
 
-import numpy as np
+try:
+    import numpy as np
+except ImportError:
+    np = None
+
+
+def _mean(vals: list[float]) -> float:
+    if np is not None:
+        return float(np.mean(vals))
+    import statistics
+    return statistics.mean(vals) if vals else 0.0
+
+
+def _percentile(vals: list[float], p: float) -> float:
+    if np is not None:
+        return float(np.percentile(vals, p))
+    if not vals:
+        return 0.0
+    sorted_vals = sorted(vals)
+    k = (len(sorted_vals) - 1) * (p / 100.0)
+    f = int(k)
+    c = f + 1
+    if c >= len(sorted_vals):
+        return sorted_vals[-1]
+    d0 = sorted_vals[f] * (c - k)
+    d1 = sorted_vals[c] * (k - f)
+    return d0 + d1
 
 from ..utils.logger import get_logger
 from .storage_base import StorageBackend
@@ -181,13 +207,13 @@ class ResourceRecommender:
                 samples_available=len(samples),
             )
 
-        cpu_vals = np.array([s.cpu_percent for s in samples if s.cpu_percent is not None])
-        mem_usage_vals = np.array(
-            [s.memory_usage for s in samples if s.memory_usage is not None]
-        )
-        mem_pct_vals = np.array(
-            [s.memory_percent for s in samples if s.memory_percent is not None]
-        )
+        cpu_vals = [s.cpu_percent for s in samples if s.cpu_percent is not None]
+        mem_usage_vals = [
+            s.memory_usage for s in samples if s.memory_usage is not None
+        ]
+        mem_pct_vals = [
+            s.memory_percent for s in samples if s.memory_percent is not None
+        ]
 
         if len(cpu_vals) < self.MIN_SAMPLES or len(mem_usage_vals) < self.MIN_SAMPLES:
             return InsufficientDataResult(
@@ -197,9 +223,9 @@ class ResourceRecommender:
                 samples_available=min(len(cpu_vals), len(mem_usage_vals)),
             )
 
-        p95_cpu = float(np.percentile(cpu_vals, 95))
-        p95_memory_bytes = int(np.percentile(mem_usage_vals, 95))
-        p95_memory_pct = float(np.percentile(mem_pct_vals, 95))
+        p95_cpu = _percentile(cpu_vals, 95)
+        p95_memory_bytes = int(_percentile(mem_usage_vals, 95))
+        p95_memory_pct = _percentile(mem_pct_vals, 95)
 
         recommended_cpu_pct = p95_cpu * (1 + safety_margin)
         recommended_memory_bytes = int(p95_memory_bytes * (1 + safety_margin))
@@ -274,7 +300,7 @@ class ResourceRecommender:
         if not samples:
             return False, None
 
-        cutoff = datetime.utcnow() - timedelta(minutes=window_minutes)
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=window_minutes)
         recent = [s for s in samples if s.timestamp >= cutoff]
 
         if len(recent) < 2:
@@ -286,8 +312,8 @@ class ResourceRecommender:
         if not cpu_vals or not mem_vals:
             return False, None
 
-        avg_cpu = float(np.mean(cpu_vals))
-        avg_mem = float(np.mean(mem_vals))
+        avg_cpu = _mean(cpu_vals)
+        avg_mem = _mean(mem_vals)
 
         if avg_cpu < self.IDLE_CPU_THRESHOLD and avg_mem < self.IDLE_MEMORY_THRESHOLD:
             return True, "scale_to_zero"
@@ -301,42 +327,22 @@ class ResourceRecommender:
     ) -> tuple[bool, float]:
         """
         Detect a sustained upward trend in memory usage, skipping pre-restart data.
-
-        Strategy:
-          1. Filter to samples within the last ``window_hours`` hours.
-          2. Scan for **restart boundaries**: a single-step drop in
-             memory_percent exceeding RESTART_DROP_THRESHOLD.
-          3. If a restart is found, discard all samples before the most
-             recent restart so the regression is computed only on fresh data.
-          4. Fit a linear regression (numpy polyfit degree=1) on the
-             post-restart (or full, if no restart) segment.
-          5. slope > LEAK_SLOPE_THRESHOLD (%/hour) → memory leak.
-
-        Args:
-            samples: List of MetricsSample objects ordered oldest-first.
-            window_hours: How far back to look for the trend.
-
-        Returns:
-            Tuple of (is_leak: bool, slope_pct_per_hour: float).
         """
         if len(samples) < self.MIN_SAMPLES:
             return False, 0.0
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         cutoff = now - timedelta(hours=window_hours)
         recent = [s for s in samples if s.timestamp >= cutoff and s.memory_percent is not None]
 
         if len(recent) < self.MIN_SAMPLES:
             return False, 0.0
 
-        # ----------------------------------------------------------------
-        # Restart-boundary detection: find the last sharp negative drop
-        # ----------------------------------------------------------------
         last_restart_idx = -1
         for i in range(1, len(recent)):
             drop = recent[i - 1].memory_percent - recent[i].memory_percent
             if drop >= self.RESTART_DROP_THRESHOLD:
-                last_restart_idx = i  # first sample *after* the restart
+                last_restart_idx = i
 
         if last_restart_idx >= 0:
             post_restart = recent[last_restart_idx:]
@@ -347,19 +353,31 @@ class ResourceRecommender:
             if len(post_restart) >= self.MIN_SAMPLES:
                 recent = post_restart
             else:
-                # Not enough post-restart data to assess leak
                 return False, 0.0
 
         t0 = recent[0].timestamp
-        x = np.array([(s.timestamp - t0).total_seconds() / 3600.0 for s in recent])
-        y = np.array([s.memory_percent for s in recent])
+        x_vals = [(s.timestamp - t0).total_seconds() / 3600.0 for s in recent]
+        y_vals = [s.memory_percent for s in recent]
 
         try:
-            coeffs = np.polyfit(x, y, 1)
+            if np is not None:
+                x = np.array(x_vals)
+                y = np.array(y_vals)
+                coeffs = np.polyfit(x, y, 1)
+                slope_per_hour = float(coeffs[0])
+            else:
+                # Simple linear regression fallback
+                n = len(x_vals)
+                mean_x = sum(x_vals) / n
+                mean_y = sum(y_vals) / n
+                denom = sum((xi - mean_x) ** 2 for xi in x_vals)
+                if denom < 1e-6:
+                    slope_per_hour = 0.0
+                else:
+                    slope_per_hour = sum((xi - mean_x) * (yi - mean_y) for xi, yi in zip(x_vals, y_vals)) / denom
         except Exception:
             return False, 0.0
 
-        slope_per_hour = float(coeffs[0])  # % change per hour
         is_leak = slope_per_hour > self.LEAK_SLOPE_THRESHOLD
 
         return is_leak, slope_per_hour
@@ -371,15 +389,8 @@ class ResourceRecommender:
     ) -> tuple[bool, float]:
         """
         Public async wrapper for memory leak detection.
-
-        Args:
-            container_id: Container to analyse.
-            window_hours: Trend window in hours.
-
-        Returns:
-            Tuple of (is_leak: bool, slope_pct_per_hour: float).
         """
-        minutes = int(window_hours * 60) + 5  # slight buffer
+        minutes = int(window_hours * 60) + 5
         samples = await self.storage.get_recent_metrics(container_id, minutes=minutes)
         return self._detect_memory_leak(samples, window_hours=window_hours)
 
@@ -396,21 +407,18 @@ def z_score_anomaly(
 ) -> tuple[bool, float]:
     """
     Compute z-score of ``current`` against the distribution in ``values``.
-
-    Args:
-        values: Recent historical values.
-        current: The value to test.
-        threshold: Z-score magnitude above which we flag an anomaly.
-
-    Returns:
-        Tuple of (is_anomaly: bool, z_score: float).
     """
     if len(values) < 5:
         return False, 0.0
 
-    arr = np.array(values, dtype=float)
-    mean = float(np.mean(arr))
-    std = float(np.std(arr))
+    if np is not None:
+        arr = np.array(values, dtype=float)
+        mean = float(np.mean(arr))
+        std = float(np.std(arr))
+    else:
+        import statistics
+        mean = statistics.mean(values)
+        std = statistics.stdev(values) if len(values) > 1 else 0.0
 
     if std < 1e-6:
         return False, 0.0

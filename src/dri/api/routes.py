@@ -1,6 +1,6 @@
 """FastAPI routes for DRI agent HTTP API."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -17,6 +17,8 @@ from .models import (
     AlertsResponse,
     ActionHistoryResponse,
     ActionHistoryListResponse,
+    EventResponse,
+    EventsResponse,
     PoliciesResponse,
     HealthCheckResponse,
     RecommendationResponse,
@@ -218,6 +220,64 @@ async def get_action_history(
         return ActionHistoryListResponse(
             timestamp=datetime.utcnow(),
             actions=action_responses,
+            total_count=total,
+        )
+
+
+@router.get("/events", response_model=EventsResponse)
+async def get_events(
+    container_id: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+) -> EventsResponse:
+    """
+    Get Docker lifecycle events.
+
+    Query Parameters:
+        container_id: Optional container ID filter
+        limit: Max number of events (default 100)
+        offset: Offset for pagination (default 0)
+    """
+    metrics_requests.labels(method="GET", endpoint="events").inc()
+
+    with metrics_latency.labels(endpoint="events").time():
+        if not storage:
+            raise HTTPException(status_code=500, detail="Storage not initialized")
+
+        try:
+            records = await storage.get_recent_events(
+                container_id=container_id,
+                limit=limit,
+                offset=offset,
+            )
+            total = await storage.count_events(container_id=container_id)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Storage error: {exc}") from exc
+
+        event_responses = []
+        for r in records:
+            import json
+            attrs = {}
+            if r.attributes:
+                try:
+                    attrs = json.loads(r.attributes) if isinstance(r.attributes, str) else r.attributes
+                except Exception:
+                    attrs = {}
+            event_responses.append(
+                EventResponse(
+                    id=r.id,
+                    container_id=r.container_id,
+                    container_name=r.container_name,
+                    event_type=r.event_type,
+                    action=r.action,
+                    timestamp=r.timestamp,
+                    attributes=attrs,
+                )
+            )
+
+        return EventsResponse(
+            timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
+            events=event_responses,
             total_count=total,
         )
 

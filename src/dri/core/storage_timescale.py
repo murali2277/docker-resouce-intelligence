@@ -82,6 +82,9 @@ class AlertRecord(Base):
     acknowledged = Column(Boolean, default=False)
 
 
+import uuid
+
+
 class ActionRecord(Base):
     """ORM model for actions."""
     __tablename__ = "actions"
@@ -95,6 +98,19 @@ class ActionRecord(Base):
     details = Column(Text)
     success = Column(Boolean)
     error_message = Column(Text, nullable=True)
+
+
+class DockerEventRecord(Base):
+    """ORM model for Docker lifecycle events."""
+    __tablename__ = "docker_events"
+
+    id = Column(String(36), primary_key=True)
+    container_id = Column(String(12), index=True)
+    container_name = Column(String(256))
+    event_type = Column(String(50))
+    action = Column(String(50), index=True)
+    timestamp = Column(DateTime, index=True)
+    attributes = Column(Text)  # JSON serialized
 
 
 class RecommendationCache(Base):
@@ -363,6 +379,99 @@ class TimescaleStorage(StorageBackend):
                 return await loop.run_in_executor(None, _count)
             except Exception as e:
                 logger.error(f"Failed to count actions: {e}")
+                return 0
+
+    # -----------------------------------------------------------------------
+    # Docker Events
+    # -----------------------------------------------------------------------
+
+    async def save_event(self, event: Any) -> None:
+        """Save Docker event record."""
+        async with self.get_session() as session:
+            loop = asyncio.get_running_loop()
+
+            def _save() -> None:
+                if isinstance(event, dict):
+                    cid = event.get("container_id", "")
+                    cname = event.get("container_name", "")
+                    etype = event.get("event_type", "")
+                    action = event.get("action", "")
+                    ts = event.get("timestamp")
+                    attrs = event.get("attributes", {})
+                else:
+                    cid = getattr(event, "container_id", "")
+                    cname = getattr(event, "container_name", "")
+                    etype = getattr(event, "event_type", "")
+                    action = getattr(event, "action", "")
+                    ts = getattr(event, "timestamp", datetime.utcnow())
+                    attrs = getattr(event, "attributes", {})
+
+                if isinstance(ts, str):
+                    try:
+                        ts = datetime.fromisoformat(ts)
+                    except ValueError:
+                        ts = datetime.utcnow()
+                elif ts is None:
+                    ts = datetime.utcnow()
+
+                event_id = str(uuid.uuid4())
+                record = DockerEventRecord(
+                    id=event_id,
+                    container_id=cid,
+                    container_name=cname,
+                    event_type=etype,
+                    action=action,
+                    timestamp=ts,
+                    attributes=json.dumps(attrs if isinstance(attrs, dict) else {}),
+                )
+                session.add(record)
+                session.commit()
+
+            try:
+                await loop.run_in_executor(None, _save)
+            except Exception as e:
+                logger.error(f"Failed to save event: {e}")
+
+    async def get_recent_events(
+        self,
+        container_id: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[DockerEventRecord]:
+        """
+        Get recent Docker events ordered newest-first with optional container_id filtering.
+        """
+        async with self.get_session() as session:
+            loop = asyncio.get_running_loop()
+
+            def _get() -> List[DockerEventRecord]:
+                query = session.query(DockerEventRecord)
+                if container_id:
+                    query = query.filter(DockerEventRecord.container_id == container_id)
+                return (
+                    query.order_by(DockerEventRecord.timestamp.desc())
+                    .offset(offset)
+                    .limit(limit)
+                    .all()
+                )
+
+            return await loop.run_in_executor(None, _get)
+
+    async def count_events(self, container_id: Optional[str] = None) -> int:
+        """Return total number of stored events, optionally filtered by container_id."""
+        async with self.get_session() as session:
+            loop = asyncio.get_running_loop()
+
+            def _count() -> int:
+                query = session.query(DockerEventRecord)
+                if container_id:
+                    query = query.filter(DockerEventRecord.container_id == container_id)
+                return query.count()
+
+            try:
+                return await loop.run_in_executor(None, _count)
+            except Exception as e:
+                logger.error(f"Failed to count events: {e}")
                 return 0
 
     async def save_recommendation_cache(

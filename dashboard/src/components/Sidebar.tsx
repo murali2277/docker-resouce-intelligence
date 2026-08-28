@@ -11,6 +11,7 @@ const NAV = [
   { to: '/recommendations',icon: '💡', label: 'Recommendations' },
   { to: '/forecast',       icon: '📈', label: 'Forecast' },
   { to: '/actions',        icon: '⚙️', label: 'Actions History' },
+  { to: '/events',         icon: '📡', label: 'Docker Events' },
   { to: '/policies',       icon: '📋', label: 'Policies' },
 ];
 

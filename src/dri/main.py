@@ -84,6 +84,10 @@ class DRIAgent:
         self.alerts_generated = 0
         self.actions_executed = 0
 
+        # Event & restart tracking
+        self.restart_counts: dict[str, int] = {}
+        self._container_died: set[str] = set()
+
     async def initialize(self) -> None:
         """Initialize all agent components."""
         logger_module.info("Initializing DRI agent...")
@@ -152,11 +156,33 @@ class DRIAgent:
             await self.storage.save_alert(alert)
 
     async def _on_docker_event(self, event) -> None:
-        """Handle Docker events."""
+        """Handle Docker events.
+
+        Persists event record to storage and tracks container restarts.
+        Definition of restart count: A container restart is counted when a
+        ``die`` event for a container_id is followed by a subsequent ``start``
+        event for the same container_id.
+        """
         logger_module.info(
             f"Docker event: {event.action} "
             f"[container={event.container_id}, name={event.container_name}]"
         )
+
+        if self.storage:
+            await self.storage.save_event(event)
+
+        cid = getattr(event, "container_id", "")
+        action = getattr(event, "action", "")
+
+        if cid:
+            if action == "die":
+                self._container_died.add(cid)
+            elif action == "start":
+                if cid in self._container_died:
+                    self.restart_counts[cid] = self.restart_counts.get(cid, 0) + 1
+                    self._container_died.remove(cid)
+                    if self.aggregator:
+                        self.aggregator.update_restart_count(cid, self.restart_counts[cid])
 
     async def _collect_metrics_loop(self) -> None:
         """Continuously collect metrics."""
@@ -287,7 +313,7 @@ class DRIAgent:
 
             elif alert.alert_type == "webhook":
                 # Trigger webhook
-                if self.config.actions.webhook_url:
+                if self.heal_action and self.config.actions.webhook_url:
                     success = await self.heal_action.trigger_webhook(
                         self.config.actions.webhook_url,
                         "resource_alert",

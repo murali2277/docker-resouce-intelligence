@@ -104,6 +104,27 @@ class StorageBackend(ABC):
         """Return total number of stored actions."""
 
     # ------------------------------------------------------------------
+    # Events
+    # ------------------------------------------------------------------
+
+    @abstractmethod
+    async def save_event(self, event: Any) -> None:
+        """Persist a Docker event (dri.events.listener.ContainerEvent or equivalent)."""
+
+    @abstractmethod
+    async def get_recent_events(
+        self,
+        container_id: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[Any]:
+        """Return events ordered newest-first with pagination and optional container_id filter."""
+
+    @abstractmethod
+    async def count_events(self, container_id: Optional[str] = None) -> int:
+        """Return total number of stored events, optionally filtered by container_id."""
+
+    # ------------------------------------------------------------------
     # Recommendation cache
     # ------------------------------------------------------------------
 

@@ -93,6 +93,9 @@ class AggregatedMetrics:
     block_io_write: int = 0
     pids: int = 0
 
+    # Restart count for the container (tracked by DRIAgent / event listener)
+    restart_count: int = 0
+
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary, serializing datetime."""

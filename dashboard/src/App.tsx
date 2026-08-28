@@ -6,6 +6,7 @@ import Alerts from './pages/Alerts';
 import Recommendations from './pages/Recommendations';
 import Forecast from './pages/Forecast';
 import ActionsHistory from './pages/ActionsHistory';
+import Events from './pages/Events';
 import Policies from './pages/Policies';
 
 export default function App() {
@@ -21,6 +22,7 @@ export default function App() {
               <Route path="/recommendations" element={<Recommendations />} />
               <Route path="/forecast"        element={<Forecast />} />
               <Route path="/actions"         element={<ActionsHistory />} />
+              <Route path="/events"          element={<Events />} />
               <Route path="/policies"        element={<Policies />} />
             </Routes>
           </main>

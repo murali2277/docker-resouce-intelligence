@@ -179,7 +179,7 @@ export default function Overview() {
                         justifyContent: 'space-between',
                       }}
                     >
-                      <span>Growth: {c.memory_growth_rate_5m.toFixed(2)}%/min</span>
+                      <span>Growth: {c.memory_growth_rate_5m.toFixed(2)}%/min · Restarts: {c.restart_count ?? 0}</span>
                       <span>{new Date(c.timestamp).toLocaleTimeString()}</span>
                     </div>
                   </div>

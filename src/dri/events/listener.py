@@ -1,7 +1,7 @@
 """Docker event listener for tracking container lifecycle events."""
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import AsyncIterator, Dict, Any, Optional, Callable, List
 import docker
 
@@ -25,7 +25,7 @@ class ContainerEvent:
     """Docker container event wrapper."""
 
     def __init__(self, event_data: Dict[str, Any]):
-        self.timestamp = datetime.utcnow()
+        self.timestamp = datetime.now(timezone.utc).replace(tzinfo=None)
         self.event_type = event_data.get("Type", "")
         self.action = event_data.get("Action", "")
         self.actor = event_data.get("Actor", {})
