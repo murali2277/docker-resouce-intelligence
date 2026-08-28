@@ -50,6 +50,7 @@ export interface ContainerMetrics {
   block_io_read: number;
   block_io_write: number;
   pids: number;
+  restart_count?: number;
 }
 
 export interface MetricsList {
@@ -156,6 +157,22 @@ export interface PoliciesData {
   total_count: number;
 }
 
+export interface DockerEvent {
+  id: string;
+  container_id: string;
+  container_name: string;
+  event_type: string;
+  action: string;
+  timestamp: string;
+  attributes: Record<string, any>;
+}
+
+export interface EventsData {
+  timestamp: string;
+  events: DockerEvent[];
+  total_count: number;
+}
+
 // ── API Functions ──────────────────────────────────────────────────────────
 
 export const api = {
@@ -166,6 +183,8 @@ export const api = {
     get<AlertsData>('/api/v1/alerts', { limit, offset }),
   actions: (limit = 100, offset = 0) =>
     get<ActionsData>('/api/v1/actions/history', { limit, offset }),
+  events: (container_id?: string, limit = 100, offset = 0) =>
+    get<EventsData>('/api/v1/events', { ...(container_id ? { container_id } : {}), limit, offset }),
   recommendations: (lookback_days = 7, safety_margin = 0.2) =>
     get<RecommendationsData>('/api/v1/recommendations', { lookback_days, safety_margin }),
   forecast: (container_id: string, horizon_hours = 24, metric = 'memory_percent') =>
