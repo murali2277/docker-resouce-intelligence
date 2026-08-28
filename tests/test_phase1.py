@@ -341,3 +341,55 @@ def test_collector_parse_stats_cpu_calculation():
     assert metrics_negative is not None
     assert metrics_negative.cpu_percent == 0.0
 
+
+def test_collector_parse_stats_memory_cgroup_v1_v2_and_unlimited():
+    """_parse_stats correctly subtracts cache/inactive_file and guards against huge memory_limit."""
+    from dri.core.collector import DockerStatsCollector
+    from unittest.mock import MagicMock
+
+    collector = DockerStatsCollector()
+    container_mock = MagicMock()
+    container_mock.id = "abc123def456"
+    container_mock.name = "test_container"
+
+    # 1. cgroup v1 style: cache key in memory_stats.stats
+    stats_v1 = {
+        "memory_stats": {
+            "usage": 2048,
+            "limit": 4096,
+            "stats": {"cache": 512, "inactive_file": 256},
+        }
+    }
+    metrics_v1 = collector._parse_stats(container_mock, stats_v1)
+    assert metrics_v1 is not None
+    # raw_usage (2048) - cache (512) = 1536
+    assert metrics_v1.memory_usage == 1536
+    assert metrics_v1.memory_percent == 37.5
+
+    # 2. cgroup v2 style: only inactive_file key in memory_stats.stats
+    stats_v2 = {
+        "memory_stats": {
+            "usage": 2048,
+            "limit": 4096,
+            "stats": {"inactive_file": 512},
+        }
+    }
+    metrics_v2 = collector._parse_stats(container_mock, stats_v2)
+    assert metrics_v2 is not None
+    # raw_usage (2048) - inactive_file (512) = 1536
+    assert metrics_v2.memory_usage == 1536
+    assert metrics_v2.memory_percent == 37.5
+
+    # 3. Unlimited/huge memory limit (e.g. 9223372036854771712)
+    stats_unlimited = {
+        "memory_stats": {
+            "usage": 1024 * 1024 * 100,  # 100 MB
+            "limit": 9223372036854771712,  # Huge cgroup limit
+            "stats": {"cache": 1024 * 1024 * 10},  # 10 MB cache
+        }
+    }
+    metrics_unlimited = collector._parse_stats(container_mock, stats_unlimited)
+    assert metrics_unlimited is not None
+    assert metrics_unlimited.memory_usage == 1024 * 1024 * 90
+    assert metrics_unlimited.memory_percent == 0.0
+

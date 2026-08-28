@@ -163,10 +163,19 @@ class DockerStatsCollector:
 
 
             # Memory calculation
-            memory_usage = stats.get("memory_stats", {}).get("usage", 0)
-            memory_limit = stats.get("memory_stats", {}).get("limit", 0)
+            mem_stats = stats.get("memory_stats", {})
+            raw_usage = mem_stats.get("usage", 0)
+            detail = mem_stats.get("stats", {})
+            cache = detail.get("cache", detail.get("inactive_file", 0))
+            memory_usage = max(0, raw_usage - cache)
+            memory_limit = mem_stats.get("limit", 0)
             memory_percent = 0.0
-            if memory_limit > 0:
+
+            # Guard against unrealistically huge memory_limit (e.g. 9223372036854771712 for unlimited containers).
+            # We cap/set memory_percent to 0.0 when memory_limit exceeds 1 PB (1 << 50 bytes), since percentage
+            # of an unlimited memory pool is meaningless. Raw memory_usage is preserved so it remains useful in UI.
+            UNLIMITED_MEMORY_THRESHOLD = 1 << 50
+            if 0 < memory_limit < UNLIMITED_MEMORY_THRESHOLD:
                 memory_percent = (memory_usage / memory_limit) * 100.0
 
             # Network I/O
