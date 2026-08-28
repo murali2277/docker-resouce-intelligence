@@ -45,6 +45,11 @@ export interface ContainerMetrics {
   anomaly_type?: string;
   /** "running" | "stopped" — populated by the DRI status-poll loop. */
   container_status?: string;
+  net_io_in: number;
+  net_io_out: number;
+  block_io_read: number;
+  block_io_write: number;
+  pids: number;
 }
 
 export interface MetricsList {

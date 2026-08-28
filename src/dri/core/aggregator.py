@@ -309,6 +309,11 @@ class MetricsAggregator:
                 memory_growth_rate_1m=growth_1m,
                 memory_growth_rate_5m=growth_5m,
                 container_status=status,
+                net_io_in=latest.net_io_in,
+                net_io_out=latest.net_io_out,
+                block_io_read=latest.block_io_read,
+                block_io_write=latest.block_io_write,
+                pids=latest.pids,
             )
 
             # Detect anomalies (pass the window for z-score baseline)

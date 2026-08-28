@@ -86,6 +86,14 @@ class AggregatedMetrics:
     # Defaults to "running" so existing callers that don't set it stay valid.
     container_status: str = field(default="running")
 
+    # Current I/O counters and process stats (latest values)
+    net_io_in: int = 0
+    net_io_out: int = 0
+    block_io_read: int = 0
+    block_io_write: int = 0
+    pids: int = 0
+
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary, serializing datetime."""
         data = asdict(self)

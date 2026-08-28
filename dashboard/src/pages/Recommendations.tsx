@@ -2,12 +2,7 @@ import { api, type Recommendation } from '../api/client';
 import { usePolling } from '../hooks/usePolling';
 import { usePollingInterval } from '../hooks/PollingContext';
 import { Spinner, ErrorBanner } from '../components/MetricsCard';
-
-function fmtBytes(b: number): string {
-  if (b >= 1e9) return `${(b / 1e9).toFixed(2)} GB`;
-  if (b >= 1e6) return `${(b / 1e6).toFixed(1)} MB`;
-  return `${b} B`;
-}
+import { fmtBytes } from '../utils/format';
 
 function confidenceBadge(tier: string): string {
   const m: Record<string, string> = { high: 'badge-success', medium: 'badge-info', low: 'badge-warning' };

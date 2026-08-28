@@ -15,6 +15,11 @@ def _make_metrics(
     cpu: float = 10.0,
     memory: float = 30.0,
     ts: Optional[datetime] = None,
+    net_in: int = 0,
+    net_out: int = 0,
+    block_read: int = 0,
+    block_write: int = 0,
+    pids: int = 5,
 ) -> "ContainerMetrics":
     from dri.utils.metrics import ContainerMetrics
 
@@ -27,12 +32,13 @@ def _make_metrics(
         memory_usage=300 * 1024 * 1024,
         memory_limit=1024 * 1024 * 1024,
         memory_percent=memory,
-        net_io_in=0,
-        net_io_out=0,
-        block_io_read=0,
-        block_io_write=0,
-        pids=5,
+        net_io_in=net_in,
+        net_io_out=net_out,
+        block_io_read=block_read,
+        block_io_write=block_write,
+        pids=pids,
     )
+
 
 
 # ---------------------------------------------------------------------------
@@ -396,4 +402,50 @@ async def test_unmark_container_stopped_clears_status():
     )
 
     await storage.close()
+
+
+@pytest.mark.asyncio
+async def test_aggregate_surfaces_io_and_pids():
+    """aggregate() returns network, block I/O, and PID stats matching the latest sample."""
+    from dri.core.aggregator import MetricsAggregator
+    from dri.core.storage import MetricsStorage
+
+    storage = MetricsStorage(":memory:")
+    await storage.init()
+    agg = MetricsAggregator(storage)
+
+    now = datetime.now(timezone.utc)
+    # Add historical samples
+    for i in range(4):
+        m = _make_metrics(
+            ts=now - timedelta(minutes=5 - i),
+            net_in=100 * i,
+            net_out=50 * i,
+            block_read=200 * i,
+            block_write=150 * i,
+            pids=10 + i,
+        )
+        agg.add_metrics(m)
+
+    # Add the latest sample with distinct values
+    latest = _make_metrics(
+        ts=now,
+        net_in=9999,
+        net_out=8888,
+        block_read=7777,
+        block_write=6666,
+        pids=99,
+    )
+    agg.add_metrics(latest)
+
+    result = await agg.aggregate("abc123")
+    assert result is not None
+    assert result.net_io_in == 9999
+    assert result.net_io_out == 8888
+    assert result.block_io_read == 7777
+    assert result.block_io_write == 6666
+    assert result.pids == 99
+
+    await storage.close()
+
 

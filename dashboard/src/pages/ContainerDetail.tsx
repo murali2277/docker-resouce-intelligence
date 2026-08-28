@@ -6,12 +6,8 @@ import {
 import { api, type ContainerMetrics, type Recommendation, type ForecastData } from '../api/client';
 import { Spinner, MetricBar } from '../components/MetricsCard';
 import { usePolling } from '../hooks/usePolling';
+import { fmtBytes } from '../utils/format';
 
-function fmtBytes(b: number): string {
-  if (b >= 1e9) return `${(b / 1e9).toFixed(2)} GB`;
-  if (b >= 1e6) return `${(b / 1e6).toFixed(1)} MB`;
-  return `${b} B`;
-}
 
 function TrendChart({ container, metric }: { container: ContainerMetrics; metric: 'cpu' | 'memory' }) {
   // We have 4 moving-average points — plot them as a mini trend snapshot
@@ -139,7 +135,7 @@ export default function ContainerDetail({ container, onClose }: ContainerDetailP
         )}
 
         {/* Current stats row */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12, marginBottom: 24 }}>
           <div className="card" style={{ padding: 16 }}>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>CPU Usage</div>
             <MetricBar label="Now" value={container.cpu_percent} />
@@ -155,6 +151,29 @@ export default function ContainerDetail({ container, onClose }: ContainerDetailP
             <MetricBar label="60m avg" value={container.memory_percent_60m} />
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
               Growth: {container.memory_growth_rate_5m.toFixed(2)}%/min (5m)
+            </div>
+          </div>
+          <div className="card" style={{ padding: 16 }}>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>System & I/O</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4 }}>
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>Network RX / TX</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--accent-cyan)' }}>
+                  {fmtBytes(container.net_io_in)} / {fmtBytes(container.net_io_out)}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>Disk Read / Write</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--accent-cyan)' }}>
+                  {fmtBytes(container.block_io_read)} / {fmtBytes(container.block_io_write)}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>Processes (PIDs)</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
+                  {container.pids ?? 'N/A'}
+                </div>
+              </div>
             </div>
           </div>
         </div>

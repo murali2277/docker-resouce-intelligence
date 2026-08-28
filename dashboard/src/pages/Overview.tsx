@@ -4,6 +4,7 @@ import { usePolling } from '../hooks/usePolling';
 import { usePollingInterval } from '../hooks/PollingContext';
 import { StatCard, MetricBar, Spinner, ErrorBanner } from '../components/MetricsCard';
 import ContainerDetail from './ContainerDetail';
+import { fmtBytes } from '../utils/format';
 
 function fmtUptime(s: number): string {
   const d = Math.floor(s / 86400);
@@ -153,6 +154,21 @@ export default function Overview() {
                     <MetricBar label="CPU (5m avg)" value={c.cpu_percent_5m} />
                     <MetricBar label="Memory (now)" value={c.memory_percent} />
                     <MetricBar label="Memory (5m avg)" value={c.memory_percent_5m} />
+
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        fontSize: 10,
+                        color: 'var(--text-muted)',
+                        marginTop: 12,
+                        paddingTop: 8,
+                        borderTop: '1px solid rgba(100,150,255,0.07)',
+                      }}
+                    >
+                      <span>Net: {fmtBytes(c.net_io_in)} ↓ / {fmtBytes(c.net_io_out)} ↑</span>
+                      <span>Disk: {fmtBytes(c.block_io_read)} ⤓ / {fmtBytes(c.block_io_write)} ⤒</span>
+                    </div>
 
                     <div
                       style={{

@@ -27,6 +27,11 @@ class MetricsResponse(BaseModel):
     # loop detects it is no longer in the running set.
     # Defaults to "running" for backward compatibility with existing consumers.
     container_status: str = "running"
+    net_io_in: int = 0
+    net_io_out: int = 0
+    block_io_read: int = 0
+    block_io_write: int = 0
+    pids: int = 0
 
 
 class ContainerMetricsListResponse(BaseModel):
