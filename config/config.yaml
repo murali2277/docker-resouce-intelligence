@@ -6,7 +6,7 @@ aggregator_interval: 10        # seconds
 policy_check_interval: 10      # seconds
 
 storage:
-  sqlite_path: "/var/lib/dri/metrics.db"
+  sqlite_path: "metrics.db"
 
   # retention_hours controls how long raw metric samples are kept in SQLite.
   #
@@ -30,11 +30,11 @@ storage:
   influxdb_org: "dri"
   influxdb_bucket: "metrics"
 
-  # TimescaleDB (optional — Phase 6 spike)
+  # TimescaleDB (optional alternative backend — Phase 6 spike)
   # Activate with: docker compose --profile timescale up
-  # Then flip this flag and provide a connection URL.
+  # Then set backend to "timescaledb" and provide a connection URL.
   # Requires asyncpg:  pip install "docker-resource-intelligence[timescaledb]"
-  timescaledb_enabled: false
+  backend: "sqlite"
   # timescaledb_url: "postgresql://dri:secret@timescaledb:5432/dri"
 
 api:

@@ -75,3 +75,12 @@ dmypy.json
 *.pem
 *.key
 *.crt
+
+# Node.js frontend dependencies and build output
+node_modules/
+dist/
+dist-ssr/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*

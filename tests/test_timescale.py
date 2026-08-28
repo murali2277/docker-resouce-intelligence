@@ -114,6 +114,8 @@ def _make_action(action_id: str = "action-1"):
 async def storage():
     """Create and yield a fresh TimescaleStorage; drop test tables on teardown."""
     from dri.core.storage_timescale import TimescaleStorage
+    import asyncio
+    import sqlalchemy as sa
 
     st = TimescaleStorage(dsn=TIMESCALE_URL, retention_hours=0)  # 0 = no auto-policy
     await st.init()
@@ -121,13 +123,17 @@ async def storage():
     yield st
 
     # Cleanup — drop all tables so tests start from a clean slate
+    loop = asyncio.get_running_loop()
+    def _drop():
+        with st.engine.begin() as conn:
+            conn.execute(sa.text("DROP TABLE IF EXISTS metrics_samples CASCADE"))
+            conn.execute(sa.text("DROP TABLE IF EXISTS alerts CASCADE"))
+            conn.execute(sa.text("DROP TABLE IF EXISTS actions CASCADE"))
+            conn.execute(sa.text("DROP TABLE IF EXISTS recommendation_cache CASCADE"))
+            conn.execute(sa.text("DROP TABLE IF EXISTS forecast_cache CASCADE"))
+    
     try:
-        async with st._pool.acquire() as conn:
-            await conn.execute("DROP TABLE IF EXISTS metrics_samples CASCADE")
-            await conn.execute("DROP TABLE IF EXISTS alerts CASCADE")
-            await conn.execute("DROP TABLE IF EXISTS actions CASCADE")
-            await conn.execute("DROP TABLE IF EXISTS recommendation_cache CASCADE")
-            await conn.execute("DROP TABLE IF EXISTS forecast_cache CASCADE")
+        await loop.run_in_executor(None, _drop)
     except Exception:
         pass
     finally:
@@ -142,16 +148,18 @@ async def storage():
 @pytest.mark.timescale
 async def test_init_creates_tables(storage):
     """init() must create all required tables."""
-    import asyncpg
+    import asyncio
+    import sqlalchemy as sa
 
-    conn = await asyncpg.connect(dsn=TIMESCALE_URL)
-    try:
-        tables = await conn.fetch(
-            "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
-        )
-        table_names = {r["tablename"] for r in tables}
-    finally:
-        await conn.close()
+    loop = asyncio.get_running_loop()
+    def _check():
+        with storage.engine.connect() as conn:
+            tables = conn.execute(sa.text(
+                "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+            )).fetchall()
+            return {r[0] for r in tables}
+    
+    table_names = await loop.run_in_executor(None, _check)
 
     required = {
         "metrics_samples", "alerts", "actions",
@@ -166,16 +174,18 @@ async def test_init_creates_tables(storage):
 @pytest.mark.timescale
 async def test_hypertable_created(storage):
     """metrics_samples must be registered as a TimescaleDB hypertable."""
-    import asyncpg
+    import asyncio
+    import sqlalchemy as sa
 
-    conn = await asyncpg.connect(dsn=TIMESCALE_URL)
-    try:
-        row = await conn.fetchrow(
-            "SELECT hypertable_name FROM timescaledb_information.hypertables "
-            "WHERE hypertable_name = 'metrics_samples'"
-        )
-    finally:
-        await conn.close()
+    loop = asyncio.get_running_loop()
+    def _check():
+        with storage.engine.connect() as conn:
+            return conn.execute(sa.text(
+                "SELECT hypertable_name FROM timescaledb_information.hypertables "
+                "WHERE hypertable_name = 'metrics_samples'"
+            )).fetchone()
+            
+    row = await loop.run_in_executor(None, _check)
 
     assert row is not None, (
         "metrics_samples is not a TimescaleDB hypertable. "
@@ -202,7 +212,7 @@ async def test_save_and_get_recent_metrics(storage):
     rows = await storage.get_recent_metrics("abc123", minutes=10)
     assert len(rows) == 5, f"Expected 5 rows, got {len(rows)}"
     # Should be sorted oldest-first
-    timestamps = [r.timestamp for r in rows]
+    timestamps = [r.timestamp.replace(tzinfo=timezone.utc) if r.timestamp.tzinfo is None else r.timestamp for r in rows]
     assert timestamps == sorted(timestamps), "Rows not returned in ascending time order"
 
 
@@ -255,7 +265,10 @@ async def test_cleanup_old_data_manual(storage):
     rows = await storage.get_recent_metrics("abc123", minutes=200)
     assert len(rows) == 1, f"Expected 1 row after cleanup, got {len(rows)}"
     # Remaining row should be the recent one
-    assert abs((rows[0].timestamp.replace(tzinfo=timezone.utc) - m_new.timestamp).total_seconds()) < 5
+    ts = rows[0].timestamp
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    assert abs((ts - m_new.timestamp).total_seconds()) < 5
 
 
 # ---------------------------------------------------------------------------
