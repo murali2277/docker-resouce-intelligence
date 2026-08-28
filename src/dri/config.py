@@ -109,6 +109,14 @@ class DRIConfig(BaseModel):
     # How often (seconds) the background worker recomputes and caches
     # recommendations and forecasts for all known containers.
     recommendation_cache_interval: int = 3600  # 1 hour
+    # How often (seconds) to poll all containers (incl. stopped) to detect
+    # status transitions.  15 s is a good balance between responsiveness and
+    # Docker API overhead.
+    container_status_interval: int = 15  # seconds
+    # How many minutes after a container stops before its metrics window is
+    # evicted from the in-memory aggregator.  Keeping it at 5 min lets the
+    # dashboard show recent history briefly without lingering for 24 h.
+    container_status_cleanup_minutes: int = 5
 
     storage: StorageConfig = Field(default_factory=StorageConfig)
     api: APIConfig = Field(default_factory=APIConfig)

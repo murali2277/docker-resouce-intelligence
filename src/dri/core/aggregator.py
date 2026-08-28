@@ -2,7 +2,7 @@
 
 import asyncio
 from collections import deque
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 import statistics
 
@@ -29,6 +29,13 @@ class MetricsAggregator:
         self._windows: Dict[str, deque] = {}  # Container ID -> metrics deque
         self._max_samples = 1000  # Max samples to keep in memory
         self.metrics_processed: int = 0  # Total samples added across all containers
+
+        # Tracks containers that have stopped.  Keyed by 12-char container ID;
+        # value is the datetime (UTC) when the stop was first detected.
+        # Populated by mark_container_stopped(); cleared by either
+        # unmark_container_stopped() (container restarted) or
+        # cleanup_stopped_containers() (window eviction after grace period).
+        self._stopped_at: Dict[str, datetime] = {}
 
     def _get_window(self, container_id: str) -> deque:
         """Get or create metric window for container."""
@@ -69,7 +76,7 @@ class MetricsAggregator:
             sorted oldest-first.  Both have ``timestamp`` and
             ``cpu_percent`` / ``memory_percent`` attributes.
         """
-        cutoff = datetime.utcnow() - timedelta(minutes=minutes)
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
         window = self._get_window(container_id)
 
         # Fast path: deque covers the whole window
@@ -80,6 +87,10 @@ class MetricsAggregator:
         db_samples: List[MetricsSample] = []
         try:
             db_samples = await self.storage.get_recent_metrics(container_id, minutes=minutes)
+            # Normalize naive datetimes from SQLite to UTC aware
+            for sample in db_samples:
+                if sample.timestamp and sample.timestamp.tzinfo is None:
+                    sample.timestamp = sample.timestamp.replace(tzinfo=timezone.utc)
         except Exception as e:
             logger.warning(f"DB fallback failed for {container_id}: {e}")
 
@@ -146,7 +157,7 @@ class MetricsAggregator:
         if not window:
             return 0.0
 
-        cutoff = datetime.utcnow() - timedelta(minutes=minutes)
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
         samples = [
             getattr(m, field)
             for m in window
@@ -176,7 +187,7 @@ class MetricsAggregator:
         if len(window) < 2:
             return 0.0
 
-        cutoff = datetime.utcnow() - timedelta(minutes=minutes)
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
         samples = [
             (m.timestamp, m.memory_percent)
             for m in window
@@ -280,6 +291,9 @@ class MetricsAggregator:
             growth_1m = await self._calculate_growth_rate_hybrid(container_id, 1)
             growth_5m = await self._calculate_growth_rate_hybrid(container_id, 5)
 
+            # Determine container status from the stopped-at registry.
+            status = "stopped" if container_id in self._stopped_at else "running"
+
             agg_metrics = AggregatedMetrics(
                 container_id=latest.container_id,
                 container_name=latest.container_name,
@@ -294,6 +308,7 @@ class MetricsAggregator:
                 memory_percent_60m=mem_60m,
                 memory_growth_rate_1m=growth_1m,
                 memory_growth_rate_5m=growth_5m,
+                container_status=status,
             )
 
             # Detect anomalies (pass the window for z-score baseline)
@@ -335,7 +350,7 @@ class MetricsAggregator:
 
     def cleanup_old_containers(self, max_age_minutes: int = 1440) -> None:
         """Remove old container windows from memory."""
-        cutoff = datetime.utcnow() - timedelta(minutes=max_age_minutes)
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)
         to_remove = []
 
         for container_id, window in self._windows.items():
@@ -344,4 +359,55 @@ class MetricsAggregator:
 
         for container_id in to_remove:
             del self._windows[container_id]
+            self._stopped_at.pop(container_id, None)
             logger.debug(f"Removed old container window: {container_id}")
+
+    # ------------------------------------------------------------------
+    # Stopped-container lifecycle tracking
+    # ------------------------------------------------------------------
+
+    def mark_container_stopped(self, container_id: str) -> None:
+        """Record that a container has stopped.
+
+        Called by the status-poll loop in DRIAgent when a container that was
+        previously in the running set is no longer returned by
+        ``get_containers()`` but its window still exists in ``_windows``.
+
+        Args:
+            container_id: 12-character container ID.
+        """
+        if container_id not in self._stopped_at:
+            self._stopped_at[container_id] = datetime.now(timezone.utc)
+            logger.info(f"Container marked stopped: {container_id}")
+
+    def unmark_container_stopped(self, container_id: str) -> None:
+        """Remove a container from the stopped set (e.g. it restarted).
+
+        Args:
+            container_id: 12-character container ID.
+        """
+        if container_id in self._stopped_at:
+            del self._stopped_at[container_id]
+            logger.info(f"Container unmarked stopped (restarted?): {container_id}")
+
+    def cleanup_stopped_containers(self, max_stopped_minutes: int = 5) -> None:
+        """Evict stopped containers whose grace period has elapsed.
+
+        Containers that have been stopped for longer than *max_stopped_minutes*
+        are removed from both ``_windows`` and ``_stopped_at`` so they no
+        longer appear in API responses.
+
+        Args:
+            max_stopped_minutes: Minutes after ``stopped_at`` before eviction.
+                Defaults to 5 to prevent stale data lingering for 24 h.
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=max_stopped_minutes)
+        to_evict = [
+            cid
+            for cid, ts in self._stopped_at.items()
+            if ts <= cutoff
+        ]
+        for cid in to_evict:
+            self._windows.pop(cid, None)
+            del self._stopped_at[cid]
+            logger.info(f"Evicted stopped container window: {cid}")

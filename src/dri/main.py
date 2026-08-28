@@ -327,6 +327,73 @@ class DRIAgent:
             return
         await self.api_server.cache_worker.run()
 
+    async def _container_status_loop(self) -> None:
+        """Periodically poll all containers (incl. stopped) to detect lifecycle
+        transitions and keep the aggregator's stopped-at registry up-to-date.
+
+        Runs every ``config.container_status_interval`` seconds.  On each tick:
+
+        1. Calls ``collector.get_all_containers()`` to obtain the full list
+           including stopped/exited containers.
+        2. Diffs the running subset against ``_known_running`` to detect
+           containers that have stopped or restarted since the last tick.
+        3. Calls ``aggregator.mark_container_stopped()`` /
+           ``unmark_container_stopped()`` accordingly.
+        4. Calls ``aggregator.cleanup_stopped_containers()`` to evict windows
+           that have been stopped longer than the configured grace period.
+        """
+        if not self.collector or not self.aggregator:
+            return
+
+        logger_module.info(
+            f"Starting container status poll "
+            f"(interval: {self.config.container_status_interval}s, "
+            f"cleanup after: {self.config.container_status_cleanup_minutes}m)"
+        )
+
+        # 12-char IDs of containers that were running on the previous tick.
+        _known_running: set = set()
+
+        while self.running:
+            try:
+                await asyncio.sleep(self.config.container_status_interval)
+
+                if not self.running:
+                    break
+
+                all_containers = await self.collector.get_all_containers()
+
+                # Build the current running set (12-char IDs).
+                current_running: set = {
+                    (c.id or "")[:12]
+                    for c in all_containers
+                    if getattr(c, "status", "") == "running"
+                }
+
+                # Containers that just stopped (were running, now absent from
+                # the running set, but still have a window in the aggregator).
+                newly_stopped = (
+                    _known_running - current_running
+                ) & set(self.aggregator._windows.keys())
+
+                for cid in newly_stopped:
+                    self.aggregator.mark_container_stopped(cid)
+
+                # Containers that restarted (were stopped, now running again).
+                newly_running = current_running - _known_running
+                for cid in newly_running:
+                    self.aggregator.unmark_container_stopped(cid)
+
+                # Evict windows for containers stopped longer than the grace period.
+                self.aggregator.cleanup_stopped_containers(
+                    max_stopped_minutes=self.config.container_status_cleanup_minutes
+                )
+
+                _known_running = current_running
+
+            except Exception as e:
+                logger_module.error(f"Container status poll error: {e}")
+
     async def run(self) -> None:
         """Run the DRI agent."""
         self.running = True
@@ -348,6 +415,7 @@ class DRIAgent:
                 self._policy_check_loop(),
                 self._event_listener_loop(),
                 self._recommendation_cache_loop(),
+                self._container_status_loop(),
             ]
 
             if self.api_server:

@@ -5,6 +5,13 @@ collector_interval: 5          # seconds
 aggregator_interval: 10        # seconds
 policy_check_interval: 10      # seconds
 
+# How often (seconds) to poll all containers (incl. stopped) for status changes.
+container_status_interval: 15
+
+# How many minutes to keep a stopped container's window in memory before
+# evicting it entirely from the aggregator.
+container_status_cleanup_minutes: 5
+
 storage:
   sqlite_path: "metrics.db"
 

@@ -67,6 +67,37 @@ class DockerStatsCollector:
             logger.error(f"Failed to get containers: {e}")
             return []
 
+    async def get_all_containers(self) -> list:
+        """Get list of ALL containers, including stopped/exited/paused ones.
+
+        Each returned container object exposes a ``.status`` attribute whose
+        value is one of the Docker lifecycle strings: ``'running'``,
+        ``'exited'``, ``'paused'``, ``'created'``, ``'restarting'``, etc.
+
+        This method is used exclusively by the status-poll loop in
+        :class:`DRIAgent` to detect container lifecycle transitions.  The
+        regular stats-collection path (``stream_metrics``) continues to use
+        ``get_containers()`` which only returns running containers.
+
+        Returns:
+            List of :class:`docker.models.containers.Container` objects,
+            possibly empty on error.
+        """
+        if not self.client:
+            raise RuntimeError("Not connected to Docker daemon")
+
+        loop = asyncio.get_running_loop()
+
+        def _get_all() -> list:
+            return self.client.containers.list(all=True)
+
+        try:
+            containers = await loop.run_in_executor(None, _get_all)
+            return containers
+        except Exception as e:
+            logger.error(f"Failed to get all containers: {e}")
+            return []
+
     async def collect_stats(self, container: Container) -> Optional[ContainerMetrics]:
         """
         Collect stats for a single container.

@@ -1,6 +1,6 @@
 """Metric definitions and structures for DRI agent."""
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from datetime import datetime
 from typing import Optional, Dict, Any
 from enum import Enum
@@ -80,6 +80,11 @@ class AggregatedMetrics:
     # Anomaly flags
     is_anomaly: bool = False
     anomaly_type: Optional[str] = None
+
+    # Container lifecycle status: "running" | "stopped"
+    # Populated by MetricsAggregator.aggregate() from _stopped_at tracking.
+    # Defaults to "running" so existing callers that don't set it stay valid.
+    container_status: str = field(default="running")
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary, serializing datetime."""

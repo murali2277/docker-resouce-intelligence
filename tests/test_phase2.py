@@ -295,3 +295,105 @@ async def test_policy_engine_typo_metric_logs_warning(caplog):
     assert len(warnings) == 1
     assert "Unknown metric 'typo_metric'" in warnings[0]
 
+
+# ---------------------------------------------------------------------------
+# Stopped-container status tracking and cleanup
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_stopped_container_status_and_cleanup():
+    """Full lifecycle: running → stopped → evicted.
+
+    1. Add metrics for 'abc123' — aggregate() should report container_status=='running'.
+    2. mark_container_stopped() — aggregate() should report container_status=='stopped'.
+    3. cleanup_stopped_containers(max_stopped_minutes=0) should evict the window.
+    """
+    from dri.core.aggregator import MetricsAggregator
+    from dri.core.storage import MetricsStorage
+
+    storage = MetricsStorage(":memory:")
+    await storage.init()
+    agg = MetricsAggregator(storage)
+
+    # -- Phase 1: container is running ---------------------------------------
+    now = datetime.now(timezone.utc)
+    for i in range(5):
+        m = _make_metrics(
+            container_id="abc123",
+            cpu=float(10 + i),
+            memory=float(30 + i),
+            ts=now - timedelta(minutes=4 - i),
+        )
+        agg.add_metrics(m)
+
+    result_running = await agg.aggregate("abc123")
+    assert result_running is not None, "aggregate() must return data while running"
+    assert result_running.container_status == "running", (
+        f"Expected 'running', got {result_running.container_status!r}"
+    )
+
+    # -- Phase 2: container stops -------------------------------------------
+    agg.mark_container_stopped("abc123")
+
+    result_stopped = await agg.aggregate("abc123")
+    assert result_stopped is not None, "aggregate() must still return data right after stop"
+    assert result_stopped.container_status == "stopped", (
+        f"Expected 'stopped', got {result_stopped.container_status!r}"
+    )
+
+    # Marking again is a no-op (idempotent).
+    agg.mark_container_stopped("abc123")
+    assert list(agg._stopped_at.keys()).count("abc123") == 1
+
+    # -- Phase 3: cleanup evicts the window ---------------------------------
+    # max_stopped_minutes=0 means anything stopped up to "now" is eligible,
+    # which covers our entry whose stopped_at <= datetime.utcnow().
+    # Use a tiny negative offset to ensure the cutoff is strictly in the past.
+    import time as _time
+    _time.sleep(0.01)  # guarantee stopped_at is strictly before utcnow()
+    agg.cleanup_stopped_containers(max_stopped_minutes=0)
+
+    assert "abc123" not in agg._windows, (
+        "Window should be evicted after cleanup_stopped_containers"
+    )
+    assert "abc123" not in agg._stopped_at, (
+        "_stopped_at entry should be cleared on eviction"
+    )
+
+    # -- Phase 4: aggregate() returns None for evicted container -------------
+    result_evicted = await agg.aggregate("abc123")
+    assert result_evicted is None, (
+        "aggregate() must return None for a container with no window"
+    )
+
+    await storage.close()
+
+
+@pytest.mark.asyncio
+async def test_unmark_container_stopped_clears_status():
+    """unmark_container_stopped() removes the stopped flag (simulates restart)."""
+    from dri.core.aggregator import MetricsAggregator
+    from dri.core.storage import MetricsStorage
+
+    storage = MetricsStorage(":memory:")
+    await storage.init()
+    agg = MetricsAggregator(storage)
+
+    now = datetime.now(timezone.utc)
+    for i in range(3):
+        m = _make_metrics(container_id="xyz789", ts=now - timedelta(minutes=2 - i))
+        agg.add_metrics(m)
+
+    agg.mark_container_stopped("xyz789")
+    assert (await agg.aggregate("xyz789")).container_status == "stopped"
+
+    agg.unmark_container_stopped("xyz789")
+    result = await agg.aggregate("xyz789")
+    assert result is not None
+    assert result.container_status == "running", (
+        f"Expected 'running' after unmark, got {result.container_status!r}"
+    )
+
+    await storage.close()
+

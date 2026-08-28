@@ -86,7 +86,14 @@ export default function Overview() {
             <div className="section-header">
               <div className="section-title">Containers</div>
               <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                <span className="section-count">{metrics.total_count} active</span>
+                <span className="section-count">
+                  {metrics.containers.filter(c => (c.container_status ?? 'running') === 'running').length} running
+                </span>
+                {metrics.containers.some(c => (c.container_status ?? 'running') !== 'running') && (
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    · {metrics.containers.filter(c => (c.container_status ?? 'running') !== 'running').length} stopped
+                  </span>
+                )}
                 <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                   Click a container for details
                 </span>
@@ -94,48 +101,74 @@ export default function Overview() {
             </div>
 
             <div className="container-grid">
-              {metrics.containers.map(c => (
-                <div
-                  key={c.container_id}
-                  id={`container-card-${c.container_id}`}
-                  className={`card container-card ${c.is_anomaly ? 'anomaly-glow' : ''}`}
-                  style={{ padding: 20, cursor: 'pointer' }}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setSelected(c)}
-                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') setSelected(c); }}
-                >
-                  <div className="container-name">
-                    {c.is_anomaly && <span title={c.anomaly_type ?? ''}>⚠️</span>}
-                    {c.container_name}
-                    <span className="container-id-tag">{c.container_id}</span>
-                  </div>
-
-                  {c.is_anomaly && c.anomaly_type && (
-                    <div className="badge badge-critical" style={{ marginBottom: 8, marginTop: 4 }}>
-                      🔴 {c.anomaly_type.replace(/_/g, ' ')}
-                    </div>
-                  )}
-
-                  <MetricBar label="CPU (now)" value={c.cpu_percent} />
-                  <MetricBar label="CPU (5m avg)" value={c.cpu_percent_5m} />
-                  <MetricBar label="Memory (now)" value={c.memory_percent} />
-                  <MetricBar label="Memory (5m avg)" value={c.memory_percent_5m} />
-
+              {metrics.containers.map(c => {
+                const isStopped = (c.container_status ?? 'running') !== 'running';
+                return (
                   <div
-                    style={{
-                      marginTop: 12,
-                      fontSize: 11,
-                      color: 'var(--text-muted)',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                    }}
+                    key={c.container_id}
+                    id={`container-card-${c.container_id}`}
+                    className={`card container-card${c.is_anomaly ? ' anomaly-glow' : ''}${isStopped ? ' container-card--stopped' : ''}`}
+                    style={{ padding: 20, cursor: 'pointer' }}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setSelected(c)}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') setSelected(c); }}
                   >
-                    <span>Growth: {c.memory_growth_rate_5m.toFixed(2)}%/min</span>
-                    <span>{new Date(c.timestamp).toLocaleTimeString()}</span>
+                    <div className="container-name">
+                      {c.is_anomaly && <span title={c.anomaly_type ?? ''}>⚠️</span>}
+                      {c.container_name}
+                      <span className="container-id-tag">{c.container_id}</span>
+                    </div>
+
+                    {isStopped && (
+                      <div
+                        id={`stopped-badge-${c.container_id}`}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          marginBottom: 8,
+                          marginTop: 4,
+                          padding: '2px 8px',
+                          borderRadius: 4,
+                          fontSize: 11,
+                          fontWeight: 600,
+                          letterSpacing: '0.04em',
+                          background: 'rgba(120,120,140,0.18)',
+                          color: 'var(--text-muted)',
+                          border: '1px solid rgba(120,120,140,0.3)',
+                        }}
+                      >
+                        ⬛ stopped
+                      </div>
+                    )}
+
+                    {c.is_anomaly && c.anomaly_type && (
+                      <div className="badge badge-critical" style={{ marginBottom: 8, marginTop: 4 }}>
+                        🔴 {c.anomaly_type.replace(/_/g, ' ')}
+                      </div>
+                    )}
+
+                    <MetricBar label="CPU (now)" value={c.cpu_percent} />
+                    <MetricBar label="CPU (5m avg)" value={c.cpu_percent_5m} />
+                    <MetricBar label="Memory (now)" value={c.memory_percent} />
+                    <MetricBar label="Memory (5m avg)" value={c.memory_percent_5m} />
+
+                    <div
+                      style={{
+                        marginTop: 12,
+                        fontSize: 11,
+                        color: 'var(--text-muted)',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                      }}
+                    >
+                      <span>Growth: {c.memory_growth_rate_5m.toFixed(2)}%/min</span>
+                      <span>{new Date(c.timestamp).toLocaleTimeString()}</span>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </>
         )}

@@ -3,7 +3,7 @@
 import asyncio
 import json
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from contextlib import asynccontextmanager
@@ -255,7 +255,7 @@ class SqliteStorage(StorageBackend):
             loop = asyncio.get_running_loop()
 
             def _get() -> List[MetricsSample]:
-                cutoff = datetime.utcnow() - timedelta(minutes=minutes)
+                cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
                 # Uses the composite index ix_metrics_samples_cid_ts
                 return session.query(MetricsSample).filter(
                     MetricsSample.container_id == container_id,
@@ -323,7 +323,7 @@ class SqliteStorage(StorageBackend):
             loop = asyncio.get_running_loop()
 
             def _cleanup() -> int:
-                cutoff = datetime.utcnow() - timedelta(hours=retention_hours)
+                cutoff = datetime.now(timezone.utc) - timedelta(hours=retention_hours)
                 deleted = session.query(MetricsSample).filter(
                     MetricsSample.timestamp < cutoff
                 ).delete()

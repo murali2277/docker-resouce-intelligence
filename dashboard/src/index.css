@@ -522,6 +522,19 @@ button { cursor: pointer; font-family: inherit; }
   padding: 20px;
 }
 
+/* Stopped-container modifier — dims the card to visually distinguish it
+   from live containers. Applied by Overview.tsx when container_status !== 'running'. */
+.container-card--stopped {
+  opacity: 0.55;
+  filter: saturate(0.3);
+  transition: opacity 0.3s ease, filter 0.3s ease;
+}
+
+.container-card--stopped:hover {
+  opacity: 0.75;
+  filter: saturate(0.5);
+}
+
 .container-name {
   font-size: 14px;
   font-weight: 700;
