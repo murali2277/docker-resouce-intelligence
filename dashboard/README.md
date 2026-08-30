@@ -58,6 +58,10 @@ update `client.ts` first.
 
 ## Note on Docker deployment
 
-Wiring the dashboard build into the Python Docker image / docker-compose is a
-separate follow-up task. Do **not** modify `Dockerfile` or `docker-compose.yml`
-to add the dashboard until that phase is scoped.
+The recommended production deployment path is using `docker-compose` as described in the root `README.md`. 
+The `npm run dev` approach is kept as a local-dev alternative.
+
+### VITE_API_BASE Limitation
+Note that the `VITE_API_BASE` variable is baked in at build time. This means if you build the Docker image, the API URL is statically injected into the minified Javascript. This won't work well for deployments where the agent's public URL isn't known at image-build time. 
+
+*(Nice-to-have: A future improvement could introduce an `envsubst` step in the nginx entrypoint to dynamically inject `VITE_API_BASE` at container start instead of build time.)*

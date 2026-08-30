@@ -195,15 +195,18 @@ VITE_API_BASE=http://192.168.1.10:8000 npm run dev
 
 ## Full Docker Deployment
 
-To run the **entire stack** (agent + Prometheus) as containers:
+To run the **entire stack** (agent + dashboard + Prometheus) as containers:
 
 ```bash
 cd deployment
 docker-compose up -d --build
 ```
 
+The dashboard is now included in the default deployment.
+
 | Service | URL |
 |---|---|
+| DRI Dashboard | http://localhost:5173 |
 | DRI Agent API | http://localhost:8000 |
 | Prometheus | http://localhost:9090 |
 
