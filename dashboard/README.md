@@ -19,21 +19,21 @@ npm run dev
 The dev server starts at **http://localhost:5173** and proxies nothing — all
 `/api/v1/*` requests go directly to `http://localhost:8000` (the DRI agent).
 
-If the agent runs on a different host/port, set the env variable before starting:
+If the agent runs on a different host/port, or requires API key authentication, set the environment variables before starting:
 
 ```bash
-VITE_API_BASE=http://192.168.1.10:8000 npm run dev
+VITE_API_BASE=http://192.168.1.10:8000 VITE_API_KEY=your-api-key npm run dev
 ```
 
 ## Building for production
 
 ```bash
-npm run build
+VITE_API_BASE=http://192.168.1.10:8000 VITE_API_KEY=your-api-key npm run build
 # Output: dashboard/dist/
 ```
 
 Serve `dist/` with any static file server (nginx, `npx serve dist`, etc.).
-Point `VITE_API_BASE` to the DRI agent's public URL at build time.
+Point `VITE_API_BASE` (and optionally `VITE_API_KEY`) to the DRI agent's configuration at build time.
 
 ## Views
 

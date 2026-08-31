@@ -3,7 +3,7 @@
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional, Any
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Header, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from prometheus_client import generate_latest, REGISTRY
@@ -20,6 +20,37 @@ from ..config import DRIConfig
 from . import routes
 
 logger = get_logger("api")
+
+_configured_api_key: Optional[str] = None
+
+
+def set_api_key(api_key: Optional[str]) -> None:
+    """Set the active API key for request authentication."""
+    global _configured_api_key
+    _configured_api_key = api_key
+
+
+def get_api_key() -> Optional[str]:
+    """Get the currently configured API key."""
+    return _configured_api_key
+
+
+async def verify_api_key(
+    x_api_key: Optional[str] = Header(default=None, alias="X-Api-Key"),
+) -> Optional[str]:
+    """FastAPI dependency to verify API key.
+
+    When config.api.api_key is set, checks x_api_key against it and raises
+    HTTPException(401) on mismatch or missing header.
+    When config.api.api_key is None, this is a no-op.
+    """
+    if _configured_api_key is not None:
+        if not x_api_key or x_api_key != _configured_api_key:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid or missing API key",
+            )
+    return x_api_key
 
 
 class DRIAPIServer:
@@ -48,6 +79,9 @@ class DRIAPIServer:
         self.aggregator = aggregator
         self.policy_engine = policy_engine
         self.agent = agent
+
+        # Configure API key authentication state
+        set_api_key(config.api.api_key)
 
         # Instantiate Phase 3/4 components
         self.recommender = ResourceRecommender(storage)
@@ -85,6 +119,7 @@ class DRIAPIServer:
             self.agent,
             self.recommender,
             self.forecaster,
+            self.config,
         )
 
         @asynccontextmanager
@@ -131,11 +166,20 @@ class DRIAPIServer:
                 allow_headers=["*"],
             )
 
-        # Include routes
-        app.include_router(routes.router)
+        # Include unauthenticated public router (health checks)
+        app.include_router(routes.health_router)
 
-        # Prometheus metrics endpoint
-        @app.get("/metrics")
+        # Include protected API routes with API key verification dependency
+        app.include_router(routes.router, dependencies=[Depends(verify_api_key)])
+
+        # Health alias at /health (unauthenticated)
+        @app.get("/health", response_model=routes.HealthCheckResponse, tags=["health"])
+        async def root_health_check() -> routes.HealthCheckResponse:
+            """Root health check endpoint (unauthenticated for liveness probes)."""
+            return await routes.health_check()
+
+        # Prometheus metrics endpoint (protected by API key when configured)
+        @app.get("/metrics", dependencies=[Depends(verify_api_key)])
         async def prometheus_metrics() -> Response:
             """Prometheus metrics endpoint."""
             return Response(

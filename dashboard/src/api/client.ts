@@ -1,13 +1,20 @@
 // API client — typed wrappers for all DRI backend endpoints
 
 const BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000';
+const API_KEY = import.meta.env.VITE_API_KEY;
 
 async function get<T>(path: string, params?: Record<string, string | number>): Promise<T> {
   const url = new URL(`${BASE}${path}`);
   if (params) {
     Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
   }
-  const res = await fetch(url.toString());
+  const headers: Record<string, string> = {};
+  if (API_KEY) {
+    headers['X-Api-Key'] = API_KEY;
+  }
+  const res = await fetch(url.toString(), {
+    headers: Object.keys(headers).length > 0 ? headers : undefined,
+  });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body?.detail ?? `HTTP ${res.status}`);

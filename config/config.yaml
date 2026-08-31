@@ -49,6 +49,10 @@ api:
   port: 8000
   enable_cors: true
   prometheus_metrics: true
+  # Optional: When set, all /api/v1/* and /metrics endpoints require X-Api-Key header.
+  # Leave null/commented out for local development without authentication.
+  # Setting this is strongly recommended for any non-localhost deployment.
+  api_key: null
 
 actions:
   throttle:

@@ -240,6 +240,7 @@ api:
   port: 8000
   enable_cors: true
   prometheus_metrics: true
+  api_key: null             # set a secret key string to require X-Api-Key authentication
 
 actions:
   throttle:
@@ -288,34 +289,46 @@ container_policies:
 
 Base URL: `http://localhost:8000`
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/health` | Agent health check |
-| `GET` | `/api/v1/metrics` | Current metrics for all containers |
-| `GET` | `/api/v1/metrics?container_id=<id>` | Metrics for a specific container |
-| `GET` | `/api/v1/alerts` | Recent triggered alerts |
-| `GET` | `/api/v1/actions/history` | Action execution history |
-| `GET` | `/api/v1/policies` | Active policies |
-| `GET` | `/api/v1/forecast/<container_id>` | Resource usage forecast |
-| `GET` | `/metrics` | Prometheus-format metrics |
+### Authentication
+
+By default (`api_key: null`), authentication is disabled to preserve seamless local development.
+
+For non-localhost or production deployments, configure `api.api_key` in `config/config.yaml` (or pass it via configuration). When configured:
+- All `/api/v1/*` data endpoints and the `/metrics` Prometheus endpoint require the `X-Api-Key` header.
+- Requests with missing or invalid keys return `401 Unauthorized`.
+- Health check endpoints (`/health` and `/api/v1/health`) remain unauthenticated so container liveness probes and Docker healthchecks continue to work without credentials.
+
+| Method | Endpoint | Auth Required | Description |
+|---|---|---|---|
+| `GET` | `/health` | No | Agent health check (unauthenticated for probes) |
+| `GET` | `/api/v1/health` | No | Agent health check |
+| `GET` | `/api/v1/metrics` | When configured | Current metrics for all containers |
+| `GET` | `/api/v1/metrics?container_id=<id>` | When configured | Metrics for a specific container |
+| `GET` | `/api/v1/alerts` | When configured | Recent triggered alerts |
+| `GET` | `/api/v1/actions/history` | When configured | Action execution history |
+| `GET` | `/api/v1/policies` | When configured | Active policies |
+| `GET` | `/api/v1/forecast/<container_id>` | When configured | Resource usage forecast |
+| `GET` | `/metrics` | When configured | Prometheus-format metrics |
 
 ### Quick examples
 
 ```bash
-# Health check
+# Health check (unauthenticated)
 curl http://localhost:8000/health
+curl http://localhost:8000/api/v1/health
 
+# When api_key is configured:
 # All container metrics
-curl http://localhost:8000/api/v1/metrics
+curl -H "X-Api-Key: your-secret-api-key" http://localhost:8000/api/v1/metrics
 
 # Filter by container ID (first 12 chars)
-curl "http://localhost:8000/api/v1/metrics?container_id=abc123def456"
+curl -H "X-Api-Key: your-secret-api-key" "http://localhost:8000/api/v1/metrics?container_id=abc123def456"
 
 # Recent alerts
-curl http://localhost:8000/api/v1/alerts
+curl -H "X-Api-Key: your-secret-api-key" http://localhost:8000/api/v1/alerts
 
 # Prometheus scrape endpoint
-curl http://localhost:8000/metrics
+curl -H "X-Api-Key: your-secret-api-key" http://localhost:8000/metrics
 ```
 
 ---

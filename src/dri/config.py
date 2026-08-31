@@ -95,6 +95,7 @@ class APIConfig(BaseModel):
     port: int = 8000
     enable_cors: bool = True
     prometheus_metrics: bool = True
+    api_key: Optional[str] = None
 
 
 class DRIConfig(BaseModel):

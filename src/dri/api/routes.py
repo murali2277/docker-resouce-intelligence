@@ -28,6 +28,7 @@ from .models import (
     ErrorResponse,
 )
 
+health_router = APIRouter(prefix="/api/v1", tags=["health"])
 router = APIRouter(prefix="/api/v1", tags=["metrics"])
 
 # Metrics for monitoring the agent itself
@@ -59,6 +60,7 @@ def set_dependencies(
     ag: Optional[Any] = None,
     rec: Optional[Any] = None,
     fore: Optional[Any] = None,
+    cfg: Optional[Any] = None,
 ) -> None:
     """Inject dependencies into routes."""
     global storage, aggregator, policy_engine, agent, recommender, forecaster
@@ -68,9 +70,12 @@ def set_dependencies(
     agent = ag
     recommender = rec
     forecaster = fore
+    if cfg is not None and getattr(cfg, "api", None) is not None:
+        from .server import set_api_key
+        set_api_key(cfg.api.api_key)
 
 
-@router.get("/health", response_model=HealthCheckResponse)
+@health_router.get("/health", response_model=HealthCheckResponse)
 async def health_check() -> HealthCheckResponse:
     """Health check endpoint."""
     metrics_requests.labels(method="GET", endpoint="health").inc()
