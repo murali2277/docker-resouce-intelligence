@@ -160,8 +160,8 @@ class DRIAPIServer:
         if self.config.api.enable_cors:
             app.add_middleware(
                 CORSMiddleware,
-                allow_origins=["*"],
-                allow_credentials=True,
+                allow_origins=self.config.api.allowed_origins,
+                allow_credentials=self.config.api.allowed_origins != ["*"],
                 allow_methods=["*"],
                 allow_headers=["*"],
             )

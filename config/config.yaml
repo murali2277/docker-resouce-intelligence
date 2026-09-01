@@ -48,6 +48,13 @@ api:
   host: "0.0.0.0"
   port: 8000
   enable_cors: true
+  # CORS allowed origins. Default is ["*"] for development.
+  # For production deployments, set this to the dashboard's actual origin(s) explicitly
+  # (e.g. ["http://localhost:5173"] or the production dashboard URL) rather than relying
+  # on the wildcard default, especially once API-key auth (P2-8) is in place and credentials matter.
+  # When set to specific origins (non-wildcard), allow_credentials is automatically enabled.
+  allowed_origins:
+    - "*"
   prometheus_metrics: true
   # Optional: When set, all /api/v1/* and /metrics endpoints require X-Api-Key header.
   # Leave null/commented out for local development without authentication.

@@ -94,6 +94,7 @@ class APIConfig(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8000
     enable_cors: bool = True
+    allowed_origins: List[str] = Field(default_factory=lambda: ["*"])
     prometheus_metrics: bool = True
     api_key: Optional[str] = None
 

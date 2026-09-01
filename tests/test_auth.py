@@ -3,6 +3,8 @@
 import pytest
 from httpx import AsyncClient, ASGITransport
 
+from starlette.middleware.cors import CORSMiddleware
+
 from dri.config import DRIConfig, APIConfig
 from dri.core.storage import MetricsStorage
 from dri.core.aggregator import MetricsAggregator
@@ -112,5 +114,60 @@ async def test_auth_disabled_by_default():
 
         res = await client.get("/health")
         assert res.status_code == 200
+
+    await storage.close()
+
+
+@pytest.mark.asyncio
+async def test_cors_configuration_wildcard():
+    """Wildcard allowed_origins disables allow_credentials per CORS spec."""
+    config = DRIConfig(api=APIConfig(allowed_origins=["*"]))
+    storage = MetricsStorage(":memory:")
+    await storage.init()
+
+    aggregator = MetricsAggregator(storage)
+    pe = PolicyEngine(config)
+    server = DRIAPIServer(config, storage, aggregator, pe)
+
+    cors_mw = next(m for m in server.app.user_middleware if m.cls == CORSMiddleware)
+    assert cors_mw.kwargs["allow_origins"] == ["*"]
+    assert cors_mw.kwargs["allow_credentials"] is False
+
+    async with AsyncClient(
+        transport=ASGITransport(app=server.app),
+        base_url="http://test",
+    ) as client:
+        res = await client.get("/health", headers={"Origin": "http://localhost:5173"})
+        assert res.status_code == 200
+        assert res.headers.get("access-control-allow-origin") == "*"
+        assert "access-control-allow-credentials" not in res.headers
+
+    await storage.close()
+
+
+@pytest.mark.asyncio
+async def test_cors_configuration_specific_origins():
+    """Explicit allowed_origins enables allow_credentials for credentialed fetches."""
+    origins = ["http://localhost:5173", "https://dashboard.example.com"]
+    config = DRIConfig(api=APIConfig(allowed_origins=origins))
+    storage = MetricsStorage(":memory:")
+    await storage.init()
+
+    aggregator = MetricsAggregator(storage)
+    pe = PolicyEngine(config)
+    server = DRIAPIServer(config, storage, aggregator, pe)
+
+    cors_mw = next(m for m in server.app.user_middleware if m.cls == CORSMiddleware)
+    assert cors_mw.kwargs["allow_origins"] == origins
+    assert cors_mw.kwargs["allow_credentials"] is True
+
+    async with AsyncClient(
+        transport=ASGITransport(app=server.app),
+        base_url="http://test",
+    ) as client:
+        res = await client.get("/health", headers={"Origin": "http://localhost:5173"})
+        assert res.status_code == 200
+        assert res.headers.get("access-control-allow-origin") == "http://localhost:5173"
+        assert res.headers.get("access-control-allow-credentials") == "true"
 
     await storage.close()
