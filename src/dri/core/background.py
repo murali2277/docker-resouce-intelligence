@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from ..utils.logger import get_logger
 
 if TYPE_CHECKING:
-    from .storage import MetricsStorage
+    from .storage_base import StorageBackend
     from .recommender import ResourceRecommender
     from .forecaster import MetricsForecaster
     from ..core.aggregator import MetricsAggregator
@@ -52,7 +52,7 @@ class RecommendationCacheWorker:
 
     def __init__(
         self,
-        storage: "MetricsStorage",
+        storage: "StorageBackend",
         aggregator: "MetricsAggregator",
         recommender: "ResourceRecommender",
         forecaster: Optional["MetricsForecaster"],

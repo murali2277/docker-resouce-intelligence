@@ -91,7 +91,7 @@ async def health_check() -> HealthCheckResponse:
         return HealthCheckResponse(
             status="healthy",
             version="0.1.0",
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             uptime_seconds=uptime,
             metrics_processed=metrics_processed,
             alerts_generated=alerts_generated,
@@ -131,7 +131,7 @@ async def get_metrics(
         ]
 
         return ContainerMetricsListResponse(
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             containers=metric_responses,
             total_count=len(metric_responses),
         )
@@ -178,7 +178,7 @@ async def get_alerts(
         ]
 
         return AlertsResponse(
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             alerts=alert_responses,
             total_count=total,
         )
@@ -223,7 +223,7 @@ async def get_action_history(
         ]
 
         return ActionHistoryListResponse(
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             actions=action_responses,
             total_count=total,
         )
@@ -318,7 +318,7 @@ async def get_policies() -> PoliciesResponse:
             })
 
         return PoliciesResponse(
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             policies=policies,
             total_count=len(policies),
         )
@@ -372,7 +372,7 @@ async def get_recommendations(
                         # Skip malformed cache entries gracefully
                         pass
                 return RecommendationsListResponse(
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(timezone.utc),
                     recommendations=recs,
                     total_count=len(recs),
                 )
@@ -402,7 +402,7 @@ async def get_recommendations(
                 recs.append(RecommendationResponse(**payload))
 
         return RecommendationsListResponse(
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             recommendations=recs,
             total_count=len(recs),
         )

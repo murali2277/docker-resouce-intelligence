@@ -393,3 +393,27 @@ def test_collector_parse_stats_memory_cgroup_v1_v2_and_unlimited():
     assert metrics_unlimited.memory_usage == 1024 * 1024 * 90
     assert metrics_unlimited.memory_percent == 0.0
 
+
+@pytest.mark.asyncio
+async def test_agent_metrics_processed_integration():
+    """agent.metrics_processed proxies to the aggregator and equals N after processing."""
+    from dri.main import DRIAgent
+    from dri.config import DRIConfig
+    from dri.core.aggregator import MetricsAggregator
+
+    config_mock = MagicMock(spec=DRIConfig)
+    agent = DRIAgent(config_mock)
+    
+    storage_mock = MagicMock()
+    agent.aggregator = MetricsAggregator(storage_mock)
+
+    assert agent.metrics_processed == 0
+    assert agent.aggregator.metrics_processed == 0
+
+    # Simulate metrics arriving
+    for _ in range(3):
+        agent.aggregator.add_metrics(_make_metrics())
+
+    assert agent.metrics_processed == 3
+    assert agent.aggregator.metrics_processed == 3
+

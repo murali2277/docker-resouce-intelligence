@@ -1,7 +1,7 @@
 """FastAPI server for DRI agent HTTP API."""
 
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Any
 from fastapi import FastAPI, Request, Header, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -152,7 +152,7 @@ class DRIAPIServer:
                     "status_code": 500,
                     "error": type(exc).__name__,
                     "message": str(exc),
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 },
             )
 

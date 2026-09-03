@@ -3,7 +3,7 @@
 import asyncio
 import signal
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 import docker
 
@@ -80,13 +80,17 @@ class DRIAgent:
         self.heal_action: Optional[HealAction] = None
 
         # Counters for monitoring
-        self.metrics_processed = 0
         self.alerts_generated = 0
         self.actions_executed = 0
 
         # Event & restart tracking
         self.restart_counts: dict[str, int] = {}
         self._container_died: set[str] = set()
+
+    @property
+    def metrics_processed(self) -> int:
+        """Total metrics processed by the agent."""
+        return self.aggregator.metrics_processed if self.aggregator else 0
 
     async def initialize(self) -> None:
         """Initialize all agent components."""
@@ -201,7 +205,6 @@ class DRIAgent:
                     break
 
                 # Store metrics
-                self.metrics_processed += 1
                 if self.storage:
                     await self.storage.save_metrics(metrics)
 
@@ -280,7 +283,7 @@ class DRIAgent:
                             action_id=str(alert.alert_id),
                             container_id=alert.container_id,
                             container_name=alert.container_name,
-                            timestamp=datetime.utcnow(),
+                            timestamp=datetime.now(timezone.utc),
                             action_type="throttle",
                             reason=alert.message,
                             details=result,
@@ -302,7 +305,7 @@ class DRIAgent:
                             action_id=str(alert.alert_id),
                             container_id=alert.container_id,
                             container_name=alert.container_name,
-                            timestamp=datetime.utcnow(),
+                            timestamp=datetime.now(timezone.utc),
                             action_type="isolate",
                             reason=alert.message,
                             details=result,
