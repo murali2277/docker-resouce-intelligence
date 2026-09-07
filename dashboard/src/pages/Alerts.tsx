@@ -60,7 +60,7 @@ export default function Alerts() {
       <div className="topbar">
         <div className="topbar-title">Alert Feed</div>
         <div className="topbar-meta">
-          <div className="refresh-badge">🔄 Live · {(intervalMs / 1000).toFixed(0)}s</div>
+          <div className="refresh-badge">Live · {(intervalMs / 1000).toFixed(0)}s</div>
           {data && <span>{data.total_count} total</span>}
         </div>
       </div>
@@ -78,7 +78,7 @@ export default function Alerts() {
 
             {sorted.length === 0 ? (
               <div className="empty-state">
-                <div className="empty-icon">🔔</div>
+                <div className="empty-icon">◻</div>
                 <div className="empty-title">No alerts yet</div>
                 <div className="empty-sub">Policy violations will appear here in real-time.</div>
               </div>

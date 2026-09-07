@@ -4,12 +4,12 @@ import { usePollingInterval } from '../hooks/PollingContext';
 import { Spinner, ErrorBanner } from '../components/MetricsCard';
 
 const ACTION_META: Record<string, { cls: string; icon: string }> = {
-  throttle: { cls: 'badge-warning', icon: '⚡' },
-  isolate:  { cls: 'badge-critical', icon: '🔒' },
-  restart:  { cls: 'badge-info', icon: '🔄' },
-  heal:     { cls: 'badge-info', icon: '💊' },
-  webhook:  { cls: 'badge-neutral', icon: '📡' },
-  scale:    { cls: 'badge-neutral', icon: '📐' },
+  throttle: { cls: 'badge-warning',  icon: '⚡' },
+  isolate:  { cls: 'badge-critical', icon: '■' },
+  restart:  { cls: 'badge-info',     icon: '↺' },
+  heal:     { cls: 'badge-info',     icon: '○' },
+  webhook:  { cls: 'badge-neutral',  icon: '→' },
+  scale:    { cls: 'badge-neutral',  icon: '□' },
 };
 
 function ActionRow({ action }: { action: ActionRecord }) {
@@ -66,7 +66,7 @@ export default function ActionsHistory() {
       <div className="topbar">
         <div className="topbar-title">Actions History</div>
         <div className="topbar-meta">
-          <div className="refresh-badge">🔄 {(intervalMs / 1000).toFixed(0)}s refresh</div>
+          <div className="refresh-badge">{(intervalMs / 1000).toFixed(0)}s refresh</div>
           {data && <span>{data.total_count} total actions</span>}
         </div>
       </div>
@@ -84,7 +84,7 @@ export default function ActionsHistory() {
 
             {data.actions.length === 0 ? (
               <div className="empty-state">
-                <div className="empty-icon">⚙️</div>
+                <div className="empty-icon">□</div>
                 <div className="empty-title">No actions executed yet</div>
                 <div className="empty-sub">
                   Throttle, isolate, restart, and webhook actions will appear here
