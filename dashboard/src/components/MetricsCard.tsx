@@ -8,9 +8,9 @@ interface MetricBarProps {
 }
 
 function getBarColor(pct: number): string {
-  if (pct >= 85) return 'var(--accent-red)';
-  if (pct >= 65) return 'var(--accent-amber)';
-  return 'var(--accent-cyan)';
+  if (pct >= 85) return 'var(--crit)';
+  if (pct >= 65) return 'var(--warn)';
+  return 'var(--ok)';
 }
 
 export const MetricBar: React.FC<MetricBarProps> = ({ label, value, max = 100, color }) => {
@@ -62,6 +62,10 @@ export const Spinner: React.FC = () => (
 interface ErrorBannerProps { message: string; }
 export const ErrorBanner: React.FC<ErrorBannerProps> = ({ message }) => (
   <div className="error-banner">
-    ⚠️ {message}
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+      <path d="M8 3L14 13H2L8 3Z" />
+      <path d="M8 7v3M8 11.5v.5" />
+    </svg>
+    {message}
   </div>
 );

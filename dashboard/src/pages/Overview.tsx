@@ -37,7 +37,7 @@ export default function Overview() {
       <div className="topbar">
         <div className="topbar-title">System Overview</div>
         <div className="topbar-meta">
-          <div className="refresh-badge">🔄 Live · {(intervalMs / 1000).toFixed(0)}s</div>
+          <div className="refresh-badge">Live · {(intervalMs / 1000).toFixed(0)}s</div>
           {health && <span>{new Date(health.timestamp).toLocaleTimeString()}</span>}
         </div>
       </div>
@@ -163,7 +163,7 @@ export default function Overview() {
                         color: 'var(--text-muted)',
                         marginTop: 12,
                         paddingTop: 8,
-                        borderTop: '1px solid rgba(100,150,255,0.07)',
+                        borderTop: '1px solid var(--line)',
                       }}
                     >
                       <span>Net: {fmtBytes(c.net_io_in)} ↓ / {fmtBytes(c.net_io_out)} ↑</span>
