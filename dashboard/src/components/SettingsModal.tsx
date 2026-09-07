@@ -22,7 +22,7 @@ export const SettingsModal: React.FC<{ onClose: () => void }> = ({ onClose }) =>
     <div
       style={{
         position: 'fixed', inset: 0, zIndex: 200,
-        background: 'rgba(5,11,24,0.88)',
+        background: 'rgba(10,13,17,0.88)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         padding: 24,
       }}
@@ -30,24 +30,21 @@ export const SettingsModal: React.FC<{ onClose: () => void }> = ({ onClose }) =>
     >
       <div
         className="card"
-        style={{
-          width: '100%', maxWidth: 420,
-          padding: 28,
-        }}
+        style={{ width: '100%', maxWidth: 420, padding: 28 }}
         onClick={e => e.stopPropagation()}
       >
-        <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>
-          ⚙️ Settings
+        <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--paper)', marginBottom: 4 }}>
+          Settings
         </div>
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 24 }}>
-          Configure global dashboard behavior
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 24 }}>
+          Configure global dashboard behaviour
         </div>
 
         {/* Polling interval */}
         <div style={{ marginBottom: 24 }}>
           <div style={{
-            fontSize: 11, fontWeight: 600, color: 'var(--text-muted)',
-            textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10,
+            fontSize: 11, fontWeight: 600, color: 'var(--muted)',
+            letterSpacing: '0.04em', marginBottom: 10,
           }}>
             Polling Interval
           </div>
@@ -58,29 +55,30 @@ export const SettingsModal: React.FC<{ onClose: () => void }> = ({ onClose }) =>
                 id={`settings-interval-${opt.value}`}
                 onClick={() => setSelected(opt.value)}
                 style={{
-                  padding: '8px 18px',
-                  borderRadius: 'var(--radius-md)',
+                  padding: '7px 16px',
+                  borderRadius: 'var(--r-sm)',
                   border: selected === opt.value
-                    ? '2px solid var(--accent-cyan)'
-                    : '1px solid var(--border-glass)',
+                    ? '1px solid var(--signal)'
+                    : '1px solid var(--line)',
                   background: selected === opt.value
-                    ? 'rgba(0,212,255,0.12)'
-                    : 'var(--bg-glass)',
+                    ? 'var(--signal-dim)'
+                    : 'var(--panel-soft)',
                   color: selected === opt.value
-                    ? 'var(--accent-cyan)'
-                    : 'var(--text-secondary)',
+                    ? 'var(--signal)'
+                    : 'var(--paper-soft)',
                   fontWeight: 600,
                   fontSize: 13,
                   cursor: 'pointer',
-                  transition: 'all 0.15s ease',
+                  fontFamily: 'var(--font-mono)',
+                  transition: 'all 0.12s ease',
                 }}
               >
                 {opt.label}
               </button>
             ))}
           </div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
-            All views will refresh at this interval. Lower values increase API load.
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>
+            All views refresh at this interval. Lower values increase API load.
           </div>
         </div>
 
@@ -90,11 +88,11 @@ export const SettingsModal: React.FC<{ onClose: () => void }> = ({ onClose }) =>
             id="settings-cancel-btn"
             onClick={onClose}
             style={{
-              padding: '9px 20px',
-              borderRadius: 'var(--radius-md)',
-              border: '1px solid var(--border-glass)',
-              background: 'var(--bg-glass)',
-              color: 'var(--text-secondary)',
+              padding: '8px 18px',
+              borderRadius: 'var(--r-sm)',
+              border: '1px solid var(--line)',
+              background: 'var(--panel-soft)',
+              color: 'var(--paper-soft)',
               fontWeight: 600,
               fontSize: 13,
               cursor: 'pointer',
@@ -106,15 +104,15 @@ export const SettingsModal: React.FC<{ onClose: () => void }> = ({ onClose }) =>
             id="settings-save-btn"
             onClick={handleSave}
             style={{
-              padding: '9px 20px',
-              borderRadius: 'var(--radius-md)',
+              padding: '8px 18px',
+              borderRadius: 'var(--r-sm)',
               border: 'none',
-              background: 'var(--grad-primary)',
-              color: '#fff',
-              fontWeight: 600,
+              background: 'var(--signal)',
+              color: '#0A0D11',
+              fontWeight: 700,
               fontSize: 13,
               cursor: 'pointer',
-              boxShadow: 'var(--shadow-glow)',
+              boxShadow: 'var(--shadow-ring)',
             }}
           >
             Save
