@@ -7,6 +7,9 @@ import { api, type ContainerMetrics, type Recommendation, type ForecastData } fr
 import { Spinner, MetricBar } from '../components/MetricsCard';
 import { usePolling } from '../hooks/usePolling';
 import { fmtBytes } from '../utils/format';
+import {
+  IconAnomaly, IconCritical, IconTrendUp, IconCheck, IconIdle, IconClose,
+} from '../components/icons';
 
 
 function TrendChart({ container, metric }: { container: ContainerMetrics; metric: 'cpu' | 'memory' }) {
@@ -26,12 +29,15 @@ function TrendChart({ container, metric }: { container: ContainerMetrics; metric
           { t: '60m',  v: container.memory_percent_60m },
         ];
 
-  const color = metric === 'cpu' ? '#00d4ff' : '#00e5a0';
+  // Use CSS vars instead of raw hex — resolved at runtime via getComputedStyle where
+  // recharts needs a literal colour string. We reference the semantic token names
+  // so they stay in sync with the design system.
+  const color = metric === 'cpu' ? 'var(--info)' : 'var(--ok)';
 
   return (
     <ResponsiveContainer width="100%" height={180}>
       <LineChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="rgba(100,150,255,0.07)" />
+        <CartesianGrid strokeDasharray="3 3" stroke="rgba(33,41,50,0.8)" />
         <XAxis dataKey="t" tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
         <YAxis domain={[0, 100]} tick={{ fill: 'var(--text-muted)', fontSize: 11 }} unit="%" />
         <Tooltip
@@ -106,8 +112,12 @@ export default function ContainerDetail({ container, onClose }: ContainerDetailP
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
           <div>
-            <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>
-              {container.is_anomaly && <span title={container.anomaly_type ?? ''} style={{ marginRight: 8 }}>⚠️</span>}
+            <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+              {container.is_anomaly && (
+                <span title={container.anomaly_type ?? ''} style={{ color: 'var(--warn)' }}>
+                  <IconAnomaly size={18} />
+                </span>
+              )}
               {container.container_name}
             </div>
             <div style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--text-muted)' }}>
@@ -121,16 +131,17 @@ export default function ContainerDetail({ container, onClose }: ContainerDetailP
               background: 'var(--bg-glass)', border: '1px solid var(--border-glass)',
               borderRadius: 8, color: 'var(--text-muted)',
               padding: '6px 14px', cursor: 'pointer', fontSize: 13,
+              display: 'flex', alignItems: 'center', gap: 6,
             }}
           >
-            ✕ Close
+            <IconClose size={13} /> Close
           </button>
         </div>
 
         {/* Anomaly banner */}
         {container.is_anomaly && container.anomaly_type && (
-          <div className="badge badge-critical" style={{ marginBottom: 16, display: 'inline-block' }}>
-            🔴 Anomaly: {container.anomaly_type.replace(/_/g, ' ')}
+          <div className="badge badge-critical" style={{ marginBottom: 16, display: 'inline-flex' }}>
+            <IconCritical size={11} /> Anomaly: {container.anomaly_type.replace(/_/g, ' ')}
           </div>
         )}
 
@@ -154,17 +165,17 @@ export default function ContainerDetail({ container, onClose }: ContainerDetailP
             </div>
           </div>
           <div className="card" style={{ padding: 16 }}>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>System & I/O</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>System &amp; I/O</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4 }}>
               <div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>Network RX / TX</div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--accent-cyan)' }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--info)' }}>
                   {fmtBytes(container.net_io_in)} / {fmtBytes(container.net_io_out)}
                 </div>
               </div>
               <div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>Disk Read / Write</div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--accent-cyan)' }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--info)' }}>
                   {fmtBytes(container.block_io_read)} / {fmtBytes(container.block_io_write)}
                 </div>
               </div>
@@ -202,14 +213,14 @@ export default function ContainerDetail({ container, onClose }: ContainerDetailP
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px,1fr))', gap: 16 }}>
               <div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>CPU Limit (rec)</div>
-                <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--accent-cyan)' }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--info)', fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums' }}>
                   {rec.recommended_cpu_pct.toFixed(1)}%
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>p95 {rec.p95_cpu.toFixed(1)}%</div>
               </div>
               <div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Memory Limit (rec)</div>
-                <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--accent-green)' }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--ok)', fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums' }}>
                   {fmtBytes(rec.recommended_memory_bytes)}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
@@ -228,13 +239,15 @@ export default function ContainerDetail({ container, onClose }: ContainerDetailP
               <div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Memory Trend</div>
                 {rec.is_memory_leak ? (
-                  <span className="badge badge-critical">📈 Leak +{rec.memory_leak_slope_pct_per_hour.toFixed(2)}%/hr</span>
+                  <span className="badge badge-critical">
+                    <IconTrendUp size={11} /> Leak +{rec.memory_leak_slope_pct_per_hour.toFixed(2)}%/hr
+                  </span>
                 ) : (
-                  <span className="badge badge-success">✓ Stable</span>
+                  <span className="badge badge-success"><IconCheck size={11} /> Stable</span>
                 )}
                 {rec.is_idle && (
                   <div style={{ marginTop: 6 }}>
-                    <span className="badge badge-neutral">😴 Idle — {rec.idle_recommendation}</span>
+                    <span className="badge badge-neutral"><IconIdle size={11} /> Idle — {rec.idle_recommendation}</span>
                   </div>
                 )}
               </div>
@@ -267,13 +280,13 @@ export default function ContainerDetail({ container, onClose }: ContainerDetailP
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))', gap: 16 }}>
               <div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Current</div>
-                <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-primary)' }}>
+                <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums' }}>
                   {forecast.current_value.toFixed(1)}%
                 </div>
               </div>
               <div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>In 24h (predicted)</div>
-                <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--accent-purple)' }}>
+                <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--accent-purple)', fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums' }}>
                   {forecast.predicted_value.toFixed(1)}%
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>

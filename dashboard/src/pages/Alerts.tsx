@@ -4,9 +4,28 @@ import { usePolling } from '../hooks/usePolling';
 import { usePollingInterval } from '../hooks/PollingContext';
 import { AlertRow } from '../components/AlertBadge';
 import { Spinner, ErrorBanner } from '../components/MetricsCard';
+import { IconEmptyBox } from '../components/icons';
 
 type SortKey = 'timestamp' | 'alert_type' | 'container_name' | 'current_value';
 type SortDir = 'asc' | 'desc';
+
+// Tiny inline chevron icons instead of ▼▲ unicode
+function ChevronDown() {
+  return (
+    <svg viewBox="0 0 10 6" fill="none" stroke="currentColor" strokeWidth="1.5"
+         strokeLinecap="round" strokeLinejoin="round" width={10} height={6} style={{ display: 'inline', verticalAlign: 'middle', marginLeft: 4 }}>
+      <path d="M1 1l4 4 4-4" />
+    </svg>
+  );
+}
+function ChevronUp() {
+  return (
+    <svg viewBox="0 0 10 6" fill="none" stroke="currentColor" strokeWidth="1.5"
+         strokeLinecap="round" strokeLinejoin="round" width={10} height={6} style={{ display: 'inline', verticalAlign: 'middle', marginLeft: 4 }}>
+      <path d="M1 5l4-4 4 4" />
+    </svg>
+  );
+}
 
 function SortButton({ label, sortKey, current, dir, onSort }: {
   label: string;
@@ -22,7 +41,7 @@ function SortButton({ label, sortKey, current, dir, onSort }: {
       onClick={() => onSort(sortKey)}
     >
       {label}
-      {active && <span style={{ marginLeft: 4, opacity: 0.8 }}>{dir === 'desc' ? '▼' : '▲'}</span>}
+      {active && (dir === 'desc' ? <ChevronDown /> : <ChevronUp />)}
     </th>
   );
 }
@@ -78,7 +97,7 @@ export default function Alerts() {
 
             {sorted.length === 0 ? (
               <div className="empty-state">
-                <div className="empty-icon">◻</div>
+                <div className="empty-icon"><IconEmptyBox size={28} /></div>
                 <div className="empty-title">No alerts yet</div>
                 <div className="empty-sub">Policy violations will appear here in real-time.</div>
               </div>
@@ -88,11 +107,11 @@ export default function Alerts() {
                   <table className="data-table">
                     <thead>
                       <tr>
-                        <SortButton label="Type"        sortKey="alert_type"      current={sortKey} dir={sortDir} onSort={handleSort} />
-                        <SortButton label="Container"   sortKey="container_name"  current={sortKey} dir={sortDir} onSort={handleSort} />
+                        <SortButton label="Type"        sortKey="alert_type"     current={sortKey} dir={sortDir} onSort={handleSort} />
+                        <SortButton label="Container"   sortKey="container_name" current={sortKey} dir={sortDir} onSort={handleSort} />
                         <th>Metric</th>
-                        <SortButton label="Value / Thr" sortKey="current_value"   current={sortKey} dir={sortDir} onSort={handleSort} />
-                        <SortButton label="Time"        sortKey="timestamp"       current={sortKey} dir={sortDir} onSort={handleSort} />
+                        <SortButton label="Value / Thr" sortKey="current_value"  current={sortKey} dir={sortDir} onSort={handleSort} />
+                        <SortButton label="Time"        sortKey="timestamp"      current={sortKey} dir={sortDir} onSort={handleSort} />
                         <th>Status</th>
                       </tr>
                     </thead>

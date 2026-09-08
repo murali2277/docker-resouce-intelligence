@@ -2,9 +2,10 @@ import { useState } from 'react';
 import { api, type ContainerMetrics } from '../api/client';
 import { usePolling } from '../hooks/usePolling';
 import { usePollingInterval } from '../hooks/PollingContext';
-import { StatCard, MetricBar, Spinner, ErrorBanner } from '../components/MetricsCard';
+import { MetricBar, Spinner, ErrorBanner } from '../components/MetricsCard';
 import ContainerDetail from './ContainerDetail';
 import { fmtBytes } from '../utils/format';
+import { IconAnomaly, IconCritical, IconStopped, IconContainer } from '../components/icons';
 
 function fmtUptime(s: number): string {
   const d = Math.floor(s / 86400);
@@ -13,6 +14,37 @@ function fmtUptime(s: number): string {
   if (d > 0) return `${d}d ${h}h`;
   if (h > 0) return `${h}h ${m}m`;
   return `${m}m`;
+}
+
+/** Fused instrument-strip readout row — replaces the 4-card stat grid */
+function InstrumentStrip({
+  uptime, version, metricsProcessed, alertsGenerated, actionsExecuted,
+}: {
+  uptime: string; version: string;
+  metricsProcessed: number; alertsGenerated: number; actionsExecuted: number;
+}) {
+  const segments: { label: string; value: string; sub?: string; accent?: string }[] = [
+    { label: 'UPTIME',   value: uptime,                              sub: `v${version}`,        accent: 'var(--signal)' },
+    { label: 'SAMPLES',  value: metricsProcessed.toLocaleString(),   sub: 'metrics processed',  accent: 'var(--ok)'     },
+    { label: 'ALERTS',   value: alertsGenerated.toLocaleString(),    sub: 'violations detected', accent: 'var(--warn)'  },
+    { label: 'ACTIONS',  value: actionsExecuted.toLocaleString(),    sub: 'auto-executed',       accent: 'var(--crit)'  },
+  ];
+
+  return (
+    <div className="instrument-strip" style={{ marginBottom: 32 }}>
+      {segments.map((seg, i) => (
+        <div key={seg.label} className="instrument-segment" style={{
+          borderRight: i < segments.length - 1 ? '1px solid var(--line)' : 'none',
+        }}>
+          <div className="instrument-label">{seg.label}</div>
+          <div className="instrument-value" style={{ color: seg.accent ?? 'var(--paper)' }}>
+            {seg.value}
+          </div>
+          {seg.sub && <div className="instrument-sub">{seg.sub}</div>}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export default function Overview() {
@@ -53,32 +85,14 @@ export default function Overview() {
               <span className="badge badge-success">● {health.status}</span>
             </div>
 
-            <div className="stat-grid" style={{ marginBottom: 32 }}>
-              <StatCard
-                label="Uptime"
-                value={fmtUptime(health.uptime_seconds)}
-                sub={`v${health.version}`}
-                gradient="var(--grad-primary)"
-              />
-              <StatCard
-                label="Metrics Processed"
-                value={health.metrics_processed.toLocaleString()}
-                sub="total samples stored"
-                gradient="var(--grad-success)"
-              />
-              <StatCard
-                label="Alerts Generated"
-                value={health.alerts_generated.toLocaleString()}
-                sub="policy violations detected"
-                gradient="var(--grad-warning)"
-              />
-              <StatCard
-                label="Actions Executed"
-                value={health.actions_executed.toLocaleString()}
-                sub="throttle / isolate / restart"
-                gradient="var(--grad-danger)"
-              />
-            </div>
+            {/* Fused instrument strip — replaces 4× StatCard grid */}
+            <InstrumentStrip
+              uptime={fmtUptime(health.uptime_seconds)}
+              version={health.version}
+              metricsProcessed={health.metrics_processed}
+              alertsGenerated={health.alerts_generated}
+              actionsExecuted={health.actions_executed}
+            />
           </>
         )}
 
@@ -116,7 +130,11 @@ export default function Overview() {
                     onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') setSelected(c); }}
                   >
                     <div className="container-name">
-                      {c.is_anomaly && <span title={c.anomaly_type ?? ''}>⚠️</span>}
+                      {c.is_anomaly && (
+                        <span title={c.anomaly_type ?? ''} style={{ color: 'var(--warn)' }}>
+                          <IconAnomaly size={13} />
+                        </span>
+                      )}
                       {c.container_name}
                       <span className="container-id-tag">{c.container_id}</span>
                     </div>
@@ -140,13 +158,13 @@ export default function Overview() {
                           border: '1px solid rgba(120,120,140,0.3)',
                         }}
                       >
-                        ⬛ stopped
+                        <IconStopped size={11} /> stopped
                       </div>
                     )}
 
                     {c.is_anomaly && c.anomaly_type && (
                       <div className="badge badge-critical" style={{ marginBottom: 8, marginTop: 4 }}>
-                        🔴 {c.anomaly_type.replace(/_/g, ' ')}
+                        <IconCritical size={11} /> {c.anomaly_type.replace(/_/g, ' ')}
                       </div>
                     )}
 
@@ -167,7 +185,7 @@ export default function Overview() {
                       }}
                     >
                       <span>Net: {fmtBytes(c.net_io_in)} ↓ / {fmtBytes(c.net_io_out)} ↑</span>
-                      <span>Disk: {fmtBytes(c.block_io_read)} ⤓ / {fmtBytes(c.block_io_write)} ⤒</span>
+                      <span>Disk: {fmtBytes(c.block_io_read)} r / {fmtBytes(c.block_io_write)} w</span>
                     </div>
 
                     <div
@@ -191,7 +209,9 @@ export default function Overview() {
 
         {metrics && metrics.containers.length === 0 && !loading && (
           <div className="empty-state">
-            <div className="empty-icon">🐳</div>
+            <div className="empty-icon" style={{ color: 'var(--muted)' }}>
+              <IconContainer size={32} />
+            </div>
             <div className="empty-title">No containers detected</div>
             <div className="empty-sub">Metrics will appear once the DRI agent collects data from running containers.</div>
           </div>

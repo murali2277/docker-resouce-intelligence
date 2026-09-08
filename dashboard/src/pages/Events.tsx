@@ -3,27 +3,38 @@ import { api, type DockerEvent } from '../api/client';
 import { usePolling } from '../hooks/usePolling';
 import { usePollingInterval } from '../hooks/PollingContext';
 import { Spinner, ErrorBanner } from '../components/MetricsCard';
+import {
+  IconOom, IconDie, IconDestroy, IconCreate, IconStart,
+  IconStop, IconHealth, IconContainer, IconEmptyBox, IconRestart,
+} from '../components/icons';
+import type React from 'react';
 
-const EVENT_META: Record<string, { cls: string; icon: string }> = {
-  oom:           { cls: 'badge-critical', icon: '💥' },
-  die:           { cls: 'badge-warning',  icon: '💀' },
-  destroy:       { cls: 'badge-critical', icon: '🗑️' },
-  create:        { cls: 'badge-info',     icon: '✨' },
-  start:         { cls: 'badge-success',  icon: '▶️' },
-  stop:          { cls: 'badge-neutral',  icon: '⏹️' },
-  health_status: { cls: 'badge-info',     icon: '🩺' },
+type IconFC = React.FC<{ size?: number }>;
+
+const EVENT_META: Record<string, { cls: string; Icon: IconFC; rail: string }> = {
+  oom:           { cls: 'badge-critical', Icon: IconOom,     rail: 'var(--crit)' },
+  die:           { cls: 'badge-warning',  Icon: IconDie,     rail: 'var(--warn)' },
+  destroy:       { cls: 'badge-critical', Icon: IconDestroy, rail: 'var(--crit)' },
+  create:        { cls: 'badge-info',     Icon: IconCreate,  rail: 'var(--info)' },
+  start:         { cls: 'badge-success',  Icon: IconStart,   rail: 'var(--ok)'   },
+  stop:          { cls: 'badge-neutral',  Icon: IconStop,    rail: 'var(--line-strong)' },
+  health_status: { cls: 'badge-info',     Icon: IconHealth,  rail: 'var(--info)' },
 };
 
 function EventRow({ event }: { event: DockerEvent }) {
-  const meta = EVENT_META[event.action] ?? { cls: 'badge-neutral', icon: '🐳' };
+  const meta = EVENT_META[event.action] ?? { cls: 'badge-neutral', Icon: IconContainer, rail: 'var(--line-strong)' };
+  const { Icon } = meta;
   const ts = new Date(event.timestamp).toLocaleString();
   const attrKeys = event.attributes ? Object.keys(event.attributes) : [];
 
   return (
-    <tr>
+    <tr
+      className="rail-row"
+      style={{ '--row-rail': meta.rail } as React.CSSProperties}
+    >
       <td>
         <span className={`badge ${meta.cls}`}>
-          {meta.icon} {event.action}
+          <Icon size={11} /> {event.action}
         </span>
       </td>
       <td>
@@ -72,7 +83,7 @@ export default function Events() {
       <div className="topbar">
         <div className="topbar-title">Docker Events</div>
         <div className="topbar-meta">
-          <div className="refresh-badge">🔄 {(intervalMs / 1000).toFixed(0)}s refresh</div>
+          <div className="refresh-badge"><IconRestart size={11} /> {(intervalMs / 1000).toFixed(0)}s refresh</div>
           {data && <span>{data.total_count} total events</span>}
         </div>
       </div>
@@ -107,7 +118,7 @@ export default function Events() {
 
             {events.length === 0 ? (
               <div className="empty-state">
-                <div className="empty-icon">📡</div>
+                <div className="empty-icon"><IconEmptyBox size={28} /></div>
                 <div className="empty-title">No Docker events recorded</div>
                 <div className="empty-sub">
                   OOM, die, start, stop, create, and destroy events streamed from the Docker daemon will appear here automatically.

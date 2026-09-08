@@ -108,7 +108,7 @@ export const SettingsModal: React.FC<{ onClose: () => void }> = ({ onClose }) =>
               borderRadius: 'var(--r-sm)',
               border: 'none',
               background: 'var(--signal)',
-              color: '#0A0D11',
+              color: 'var(--ink)',
               fontWeight: 700,
               fontSize: 13,
               cursor: 'pointer',

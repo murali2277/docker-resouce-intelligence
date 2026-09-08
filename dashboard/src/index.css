@@ -692,9 +692,115 @@ button { cursor: pointer; font-family: inherit; }
   );
 }
 
+/* ── Instrument Strip (Overview stat row) ────────────────── */
+/* One contiguous ruled panel divided by hairlines — replaces   */
+/* the 4-card gap-grid so it reads as a single readout cluster. */
+.instrument-strip {
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow-panel);
+  overflow: hidden;
+}
+
+.instrument-segment {
+  flex: 1;
+  padding: 18px 24px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* hairline right border between segments — set inline per-segment */
+}
+
+.instrument-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+}
+
+.instrument-value {
+  font-family: var(--font-mono);
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.instrument-sub {
+  font-size: 11px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+
+/* ── Segmented Control Bar (Forecast controls) ───────────── */
+/* Single bordered row — selects + button live inside with no  */
+/* individual box borders, only hairline dividers between them. */
+.segment-bar {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  box-shadow: var(--shadow-panel);
+  overflow: hidden;
+}
+
+.segment-field {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 0;
+}
+
+.segment-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+  padding: 8px 14px 0;
+  pointer-events: none;
+}
+
+.segment-divider {
+  width: 1px;
+  background: var(--line);
+  flex-shrink: 0;
+}
+
+.segment-bar select:focus,
+.segment-bar button:focus-visible {
+  outline: none;
+  background: var(--hover);
+}
+
+.segment-bar select:hover,
+.segment-bar button:not(:disabled):hover {
+  background: var(--hover);
+}
+
+/* ── Left-edge rail on table rows ────────────────────────── */
+/* A 3px inset box-shadow driven by --row-rail CSS var.        */
+/* Zero DOM overhead — purely declarative via CSS property.    */
+.rail-row {
+  box-shadow: inset 3px 0 0 var(--row-rail, var(--line));
+}
+
 /* Responsive */
 @media (max-width: 900px) {
   .sidebar { display: none; }
   .page-body { padding: 18px 16px; }
   .topbar { padding: 16px 18px; }
+  .instrument-strip { flex-direction: column; }
+  .instrument-segment { border-right: none !important; border-bottom: 1px solid var(--line); }
+  .instrument-segment:last-child { border-bottom: none; }
+  .segment-bar { flex-direction: column; }
+  .segment-divider { width: 100%; height: 1px; }
 }

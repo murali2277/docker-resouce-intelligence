@@ -7,6 +7,7 @@ import { api, type ForecastData, type ContainerMetrics } from '../api/client';
 import { usePolling } from '../hooks/usePolling';
 import { usePollingInterval } from '../hooks/PollingContext';
 import { Spinner, ErrorBanner } from '../components/MetricsCard';
+import { IconRun, IconClock, IconEmptyBox } from '../components/icons';
 
 const HORIZON_OPTIONS = [6, 12, 24, 48, 72, 168];
 const METRIC_OPTIONS: { value: string; label: string }[] = [
@@ -22,12 +23,11 @@ function buildChartData(
   const container = containers.find(c => c.container_id === selectedId);
   if (!container) return [];
 
-  // Provide the 5 historical moving average points we have
   const history = [
-    { name: 'now', actual: forecast?.metric === 'cpu_percent' ? container.cpu_percent : container.memory_percent },
+    { name: 'now',    actual: forecast?.metric === 'cpu_percent' ? container.cpu_percent    : container.memory_percent    },
     { name: '5m avg', actual: forecast?.metric === 'cpu_percent' ? container.cpu_percent_5m : container.memory_percent_5m },
-    { name: '15m avg', actual: forecast?.metric === 'cpu_percent' ? container.cpu_percent_15m : container.memory_percent_15m },
-    { name: '60m avg', actual: forecast?.metric === 'cpu_percent' ? container.cpu_percent_60m : container.memory_percent_60m },
+    { name: '15m avg',actual: forecast?.metric === 'cpu_percent' ? container.cpu_percent_15m: container.memory_percent_15m },
+    { name: '60m avg',actual: forecast?.metric === 'cpu_percent' ? container.cpu_percent_60m: container.memory_percent_60m },
   ];
 
   if (!forecast) return history;
@@ -43,6 +43,18 @@ function buildChartData(
     },
   ];
 }
+
+// Shared select field style for the segmented control bar
+const segFieldStyle: React.CSSProperties = {
+  background: 'transparent',
+  border: 'none',
+  color: 'var(--text-primary)',
+  padding: '10px 14px',
+  fontSize: 13,
+  outline: 'none',
+  cursor: 'pointer',
+  width: '100%',
+};
 
 export default function Forecast() {
   const [selectedId, setSelectedId] = useState<string>('');
@@ -80,34 +92,21 @@ export default function Forecast() {
       <div className="topbar">
         <div className="topbar-title">Usage Forecast</div>
         <div className="topbar-meta">
-          <div className="refresh-badge">📈 On-demand</div>
+          <div className="refresh-badge">On-demand</div>
         </div>
       </div>
 
       <div className="page-body">
-        {/* Controls */}
-        <div
-          className="card"
-          style={{ padding: '20px 24px', marginBottom: 24, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}
-        >
+        {/* Segmented control bar — single unified panel, hairlines between fields */}
+        <div className="segment-bar" style={{ marginBottom: 24 }}>
           {/* Container picker */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 220px' }}>
-            <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              Container
-            </label>
+          <div className="segment-field" style={{ flex: '1 1 220px' }}>
+            <label className="segment-label">Container</label>
             <select
               id="forecast-container-select"
               value={selectedId}
               onChange={e => { setSelectedId(e.target.value); setForecastData(null); }}
-              style={{
-                background: 'var(--bg-glass)',
-                border: '1px solid var(--border-glass)',
-                borderRadius: 'var(--radius-md)',
-                color: 'var(--text-primary)',
-                padding: '9px 14px',
-                fontSize: 13,
-                outline: 'none',
-              }}
+              style={segFieldStyle}
             >
               <option value="">— Select container —</option>
               {containers.map(c => (
@@ -118,71 +117,67 @@ export default function Forecast() {
             </select>
           </div>
 
+          <div className="segment-divider" />
+
           {/* Metric picker */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              Metric
-            </label>
+          <div className="segment-field">
+            <label className="segment-label">Metric</label>
             <select
               id="forecast-metric-select"
               value={metric}
               onChange={e => { setMetric(e.target.value); setForecastData(null); }}
-              style={{
-                background: 'var(--bg-glass)',
-                border: '1px solid var(--border-glass)',
-                borderRadius: 'var(--radius-md)',
-                color: 'var(--text-primary)',
-                padding: '9px 14px',
-                fontSize: 13,
-                outline: 'none',
-              }}
+              style={segFieldStyle}
             >
               {METRIC_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
 
+          <div className="segment-divider" />
+
           {/* Horizon picker */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              Horizon
-            </label>
+          <div className="segment-field">
+            <label className="segment-label">Horizon</label>
             <select
               id="forecast-horizon-select"
               value={horizonHours}
               onChange={e => { setHorizonHours(Number(e.target.value)); setForecastData(null); }}
-              style={{
-                background: 'var(--bg-glass)',
-                border: '1px solid var(--border-glass)',
-                borderRadius: 'var(--radius-md)',
-                color: 'var(--text-primary)',
-                padding: '9px 14px',
-                fontSize: 13,
-                outline: 'none',
-              }}
+              style={segFieldStyle}
             >
               {HORIZON_OPTIONS.map(h => <option key={h} value={h}>{h}h ahead</option>)}
             </select>
           </div>
 
-          <button
-            id="forecast-run-btn"
-            disabled={!selectedId || forecastLoading}
-            onClick={() => runForecast(selectedId)}
-            style={{
-              padding: '10px 24px',
-              background: selectedId ? 'var(--grad-primary)' : 'var(--bg-glass)',
-              border: 'none',
-              borderRadius: 'var(--radius-md)',
-              color: selectedId ? '#fff' : 'var(--text-muted)',
-              fontWeight: 600,
-              fontSize: 13,
-              cursor: selectedId ? 'pointer' : 'default',
-              transition: 'all 0.2s',
-              boxShadow: selectedId ? 'var(--shadow-glow)' : 'none',
-            }}
-          >
-            {forecastLoading ? '⏳ Running…' : '▶ Run Forecast'}
-          </button>
+          <div className="segment-divider" />
+
+          {/* Run button */}
+          <div className="segment-field" style={{ flexShrink: 0 }}>
+            <label className="segment-label">&nbsp;</label>
+            <button
+              id="forecast-run-btn"
+              disabled={!selectedId || forecastLoading}
+              onClick={() => runForecast(selectedId)}
+              style={{
+                padding: '10px 20px',
+                background: selectedId && !forecastLoading ? 'var(--signal)' : 'transparent',
+                border: 'none',
+                color: selectedId && !forecastLoading ? 'var(--paper)' : 'var(--text-muted)',
+                fontWeight: 600,
+                fontSize: 13,
+                cursor: selectedId ? 'pointer' : 'default',
+                transition: 'background var(--fast) var(--ease), color var(--fast) var(--ease)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 7,
+                whiteSpace: 'nowrap',
+                width: '100%',
+              }}
+            >
+              {forecastLoading
+                ? <><IconClock size={13} /> Running…</>
+                : <><IconRun size={13} /> Run Forecast</>
+              }
+            </button>
+          </div>
         </div>
 
         {forecastError && <ErrorBanner message={forecastError} />}
@@ -203,7 +198,7 @@ export default function Forecast() {
               {forecastData && (
                 <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
                   Predicted in {horizonHours}h:{' '}
-                  <strong style={{ color: 'var(--accent-cyan)' }}>
+                  <strong style={{ color: 'var(--info)', fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums' }}>
                     {forecastData.predicted_value.toFixed(1)}%
                   </strong>
                   {' '}(±{((forecastData.confidence_high - forecastData.confidence_low) / 2).toFixed(1)})
@@ -215,20 +210,21 @@ export default function Forecast() {
               <ResponsiveContainer width="100%" height={340}>
                 <AreaChart data={chartData} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
                   <defs>
+                    {/* Use --info (slate blue) for historical, --signal (orange) for predicted */}
                     <linearGradient id="areaActual" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor="#00d4ff" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#00d4ff" stopOpacity={0} />
+                      <stop offset="5%"  stopColor="var(--info)" stopOpacity={0.28} />
+                      <stop offset="95%" stopColor="var(--info)" stopOpacity={0} />
                     </linearGradient>
                     <linearGradient id="areaPredicted" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor="#9b6dff" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#9b6dff" stopOpacity={0} />
+                      <stop offset="5%"  stopColor="var(--signal)" stopOpacity={0.25} />
+                      <stop offset="95%" stopColor="var(--signal)" stopOpacity={0} />
                     </linearGradient>
                     <linearGradient id="areaCI" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor="#9b6dff" stopOpacity={0.12} />
-                      <stop offset="95%" stopColor="#9b6dff" stopOpacity={0} />
+                      <stop offset="5%"  stopColor="var(--signal)" stopOpacity={0.1} />
+                      <stop offset="95%" stopColor="var(--signal)" stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(100,150,255,0.07)" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(33,41,50,0.8)" />
                   <XAxis dataKey="name" tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
                   <YAxis domain={[0, 100]} tick={{ fill: 'var(--text-muted)', fontSize: 11 }} unit="%" />
                   <Tooltip
@@ -240,10 +236,10 @@ export default function Forecast() {
                     type="monotone"
                     dataKey="actual"
                     name="Historical"
-                    stroke="#00d4ff"
+                    stroke="var(--info)"
                     fill="url(#areaActual)"
                     strokeWidth={2}
-                    dot={{ fill: '#00d4ff', r: 4 }}
+                    dot={{ fill: 'var(--info)', r: 4 }}
                     connectNulls
                   />
                   {forecastData && (
@@ -260,11 +256,11 @@ export default function Forecast() {
                         type="monotone"
                         dataKey="predicted"
                         name="Predicted"
-                        stroke="#9b6dff"
+                        stroke="var(--signal)"
                         fill="url(#areaPredicted)"
                         strokeWidth={2}
                         strokeDasharray="6 3"
-                        dot={{ fill: '#9b6dff', r: 5 }}
+                        dot={{ fill: 'var(--signal)', r: 5 }}
                         connectNulls
                       />
                       <Area
@@ -277,7 +273,8 @@ export default function Forecast() {
                       />
                       <ReferenceLine
                         x={`+${horizonHours}h`}
-                        stroke="rgba(155,109,255,0.4)"
+                        stroke="var(--signal)"
+                        strokeOpacity={0.35}
                         strokeDasharray="4 2"
                       />
                     </>
@@ -286,7 +283,7 @@ export default function Forecast() {
               </ResponsiveContainer>
             ) : (
               <div className="empty-state">
-                <div className="empty-icon">📈</div>
+                <div className="empty-icon"><IconEmptyBox size={28} /></div>
                 <div className="empty-title">Select a container and click Run Forecast</div>
               </div>
             )}
@@ -295,7 +292,7 @@ export default function Forecast() {
 
         {!selectedId && (
           <div className="empty-state">
-            <div className="empty-icon">📈</div>
+            <div className="empty-icon"><IconEmptyBox size={28} /></div>
             <div className="empty-title">Choose a container to forecast</div>
             <div className="empty-sub">Select from the dropdown above, then click Run Forecast.</div>
           </div>
@@ -304,4 +301,3 @@ export default function Forecast() {
     </>
   );
 }
-
