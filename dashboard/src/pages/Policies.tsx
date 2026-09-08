@@ -2,18 +2,27 @@ import { api, type Policy, type PolicyRule } from '../api/client';
 import { usePolling } from '../hooks/usePolling';
 import { usePollingInterval } from '../hooks/PollingContext';
 import { Spinner, ErrorBanner } from '../components/MetricsCard';
+import {
+  IconWarning, IconThrottle, IconIsolate, IconRestart,
+  IconHeal, IconWebhook, IconScale, IconEmptyBox,
+} from '../components/icons';
+import type React from 'react';
 
-const ACTION_BADGE: Record<string, { cls: string; icon: string }> = {
-  warning:  { cls: 'badge-warning',  icon: '🟡' },
-  throttle: { cls: 'badge-critical', icon: '⚡' },
-  isolate:  { cls: 'badge-critical', icon: '🔒' },
-  restart:  { cls: 'badge-info',     icon: '🔄' },
-  heal:     { cls: 'badge-info',     icon: '💊' },
-  webhook:  { cls: 'badge-neutral',  icon: '📡' },
+type IconFC = React.FC<{ size?: number }>;
+
+const ACTION_BADGE: Record<string, { cls: string; Icon: IconFC }> = {
+  warning:  { cls: 'badge-warning',  Icon: IconWarning  },
+  throttle: { cls: 'badge-critical', Icon: IconThrottle },
+  isolate:  { cls: 'badge-critical', Icon: IconIsolate  },
+  restart:  { cls: 'badge-info',     Icon: IconRestart  },
+  heal:     { cls: 'badge-info',     Icon: IconHeal     },
+  webhook:  { cls: 'badge-neutral',  Icon: IconWebhook  },
+  scale:    { cls: 'badge-neutral',  Icon: IconScale    },
 };
 
 function RuleRow({ rule, idx }: { rule: PolicyRule; idx: number }) {
-  const meta = ACTION_BADGE[rule.action] ?? { cls: 'badge-neutral', icon: '⚙️' };
+  const meta = ACTION_BADGE[rule.action] ?? { cls: 'badge-neutral', Icon: IconScale };
+  const { Icon } = meta;
 
   return (
     <tr>
@@ -22,7 +31,7 @@ function RuleRow({ rule, idx }: { rule: PolicyRule; idx: number }) {
       </td>
       <td>
         <code style={{
-          background: 'rgba(0,212,255,0.08)',
+          background: 'rgba(255,122,50,0.06)',
           padding: '3px 8px',
           borderRadius: 'var(--radius-sm)',
           fontSize: 12,
@@ -42,7 +51,7 @@ function RuleRow({ rule, idx }: { rule: PolicyRule; idx: number }) {
       </td>
       <td>
         <span className={`badge ${meta.cls}`}>
-          {meta.icon} {rule.action}
+          <Icon size={11} /> {rule.action}
         </span>
       </td>
     </tr>
@@ -60,12 +69,18 @@ function PolicyCard({ policy }: { policy: Policy }) {
         className="card-header"
         style={{
           background: isGlobal
-            ? 'linear-gradient(135deg, rgba(77,124,254,0.12) 0%, rgba(0,212,255,0.08) 100%)'
-            : 'linear-gradient(135deg, rgba(155,109,255,0.12) 0%, rgba(0,229,160,0.08) 100%)',
+            ? 'rgba(108,142,191,0.08)'
+            : 'rgba(63,184,118,0.06)',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ fontSize: 20 }}>{isGlobal ? '🌐' : '📦'}</span>
+          {/* Scope tag instead of emoji */}
+          <span
+            className="badge badge-info"
+            style={{ fontSize: 10, letterSpacing: '0.06em', fontWeight: 700 }}
+          >
+            {isGlobal ? 'GLOBAL' : 'SCOPED'}
+          </span>
           <div>
             <div className="card-title" style={{ marginBottom: 2 }}>
               {policy.name}
@@ -138,7 +153,7 @@ export default function Policies() {
       <div className="topbar">
         <div className="topbar-title">Policies</div>
         <div className="topbar-meta">
-          <div className="refresh-badge">🔄 {(intervalMs / 1000).toFixed(0)}s refresh</div>
+          <div className="refresh-badge"><IconRestart size={11} /> {(intervalMs / 1000).toFixed(0)}s refresh</div>
           {data && <span>{data.total_count} polic{data.total_count === 1 ? 'y' : 'ies'}</span>}
         </div>
       </div>
@@ -149,19 +164,20 @@ export default function Policies() {
 
         {data && (
           <>
+            {/* Info strip — plain prose, no emoji */}
             <div
               style={{
                 marginBottom: 24,
                 padding: '14px 20px',
-                background: 'rgba(155,109,255,0.07)',
-                border: '1px solid rgba(155,109,255,0.15)',
+                background: 'rgba(108,142,191,0.06)',
+                border: '1px solid var(--line)',
                 borderRadius: 'var(--radius-md)',
                 fontSize: 13,
                 color: 'var(--text-secondary)',
                 lineHeight: 1.6,
               }}
             >
-              📋 Policies define the threshold rules that trigger alerts and automated actions.
+              Policies define the threshold rules that trigger alerts and automated actions.
               The <strong>global policy</strong> applies to all containers; per-container policies
               add overrides via <strong>selectors</strong> (image name, container ID).
               Rules specify a <strong>metric + operator + threshold</strong>, a <strong>duration</strong> before
@@ -177,7 +193,7 @@ export default function Policies() {
 
             {data.policies.length === 0 ? (
               <div className="empty-state">
-                <div className="empty-icon">📋</div>
+                <div className="empty-icon"><IconEmptyBox size={28} /></div>
                 <div className="empty-title">No policies configured</div>
                 <div className="empty-sub">
                   Add policies to config.yaml to define threshold rules for your containers.
