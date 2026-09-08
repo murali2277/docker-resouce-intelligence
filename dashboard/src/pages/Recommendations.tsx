@@ -1,8 +1,12 @@
+import { useState } from 'react';
 import { api, type Recommendation } from '../api/client';
 import { usePolling } from '../hooks/usePolling';
 import { usePollingInterval } from '../hooks/PollingContext';
 import { Spinner, ErrorBanner } from '../components/MetricsCard';
 import { fmtBytes } from '../utils/format';
+import {
+  IconTrendUp, IconCheck, IconIdle, IconEmptyBox, IconRestart, IconClose,
+} from '../components/icons';
 
 function confidenceBadge(tier: string): string {
   const m: Record<string, string> = { high: 'badge-success', medium: 'badge-info', low: 'badge-warning' };
@@ -20,19 +24,35 @@ function RecRow({ rec }: { rec: Recommendation }) {
         </span>
       </td>
       <td>
-        <span style={{ color: 'var(--accent-cyan)', fontWeight: 700 }}>
+        {/* CPU — larger tabular-nums */}
+        <span style={{
+          fontFamily: 'var(--font-mono)',
+          fontSize: 22,
+          fontWeight: 600,
+          fontVariantNumeric: 'tabular-nums',
+          color: 'var(--info)',
+          lineHeight: 1,
+          display: 'block',
+        }}>
           {rec.recommended_cpu_pct.toFixed(1)}%
         </span>
-        <br />
         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
           p95 {rec.p95_cpu.toFixed(1)}%
         </span>
       </td>
       <td>
-        <span style={{ color: 'var(--accent-green)', fontWeight: 700 }}>
+        {/* Memory — larger tabular-nums */}
+        <span style={{
+          fontFamily: 'var(--font-mono)',
+          fontSize: 22,
+          fontWeight: 600,
+          fontVariantNumeric: 'tabular-nums',
+          color: 'var(--ok)',
+          lineHeight: 1,
+          display: 'block',
+        }}>
           {fmtBytes(rec.recommended_memory_bytes)}
         </span>
-        <br />
         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
           p95 {fmtBytes(rec.p95_memory_bytes)} ({rec.p95_memory_pct.toFixed(1)}%)
         </span>
@@ -51,15 +71,15 @@ function RecRow({ rec }: { rec: Recommendation }) {
         {/* Memory trend + idle */}
         {rec.is_memory_leak ? (
           <span className="badge badge-critical">
-            📈 Leak +{rec.memory_leak_slope_pct_per_hour.toFixed(2)}%/hr
+            <IconTrendUp size={11} /> Leak +{rec.memory_leak_slope_pct_per_hour.toFixed(2)}%/hr
           </span>
         ) : (
-          <span className="badge badge-success">✓ Stable</span>
+          <span className="badge badge-success"><IconCheck size={11} /> Stable</span>
         )}
         {rec.is_idle && (
           <div style={{ marginTop: 4 }}>
             <span className="badge badge-neutral">
-              😴 {rec.idle_recommendation ?? 'Idle'}
+              <IconIdle size={11} /> {rec.idle_recommendation ?? 'Idle'}
             </span>
           </div>
         )}
@@ -87,16 +107,16 @@ function RecRow({ rec }: { rec: Recommendation }) {
 
 export default function Recommendations() {
   const { intervalMs } = usePollingInterval();
-  // Recommendations are cache-based; use 6× base interval (minimum 60s)
   const recInterval = Math.max(60_000, intervalMs * 6);
   const { data, loading, error } = usePolling(() => api.recommendations(), recInterval);
+  const [infoDismissed, setInfoDismissed] = useState(false);
 
   return (
     <>
       <div className="topbar">
         <div className="topbar-title">Resource Recommendations</div>
         <div className="topbar-meta">
-          <div className="refresh-badge">🔄 {(recInterval / 1000).toFixed(0)}s refresh</div>
+          <div className="refresh-badge"><IconRestart size={11} /> {(recInterval / 1000).toFixed(0)}s refresh</div>
           {data && <span>{data.total_count} containers</span>}
         </div>
       </div>
@@ -107,23 +127,48 @@ export default function Recommendations() {
 
         {data && (
           <>
-            <div
-              style={{
-                marginBottom: 24,
-                padding: '14px 20px',
-                background: 'rgba(0,212,255,0.07)',
-                border: '1px solid rgba(0,212,255,0.15)',
-                borderRadius: 'var(--radius-md)',
-                fontSize: 13,
-                color: 'var(--text-secondary)',
-                lineHeight: 1.6,
-              }}
-            >
-              💡 Recommended limits are computed from <strong>p95 usage over the last 7 days</strong>{' '}
-              plus a <strong>+20% safety margin</strong>. Memory leak detection uses 6-hour linear regression.
-              Results are served from the background cache (refreshed hourly); click{' '}
-              <strong>Forecast</strong> for per-container projections.
-            </div>
+            {/* Collapsible info strip */}
+            {!infoDismissed && (
+              <div
+                style={{
+                  marginBottom: 24,
+                  padding: '10px 16px',
+                  background: 'rgba(108,142,191,0.06)',
+                  border: '1px solid var(--line)',
+                  borderRadius: 'var(--radius-md)',
+                  fontSize: 12,
+                  color: 'var(--text-muted)',
+                  lineHeight: 1.6,
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 12,
+                }}
+              >
+                <span style={{ flex: 1 }}>
+                  Recommended limits computed from{' '}
+                  <strong style={{ color: 'var(--paper-soft)' }}>p95 usage over the last 7 days</strong>{' '}
+                  plus a <strong style={{ color: 'var(--paper-soft)' }}>+20% safety margin</strong>.
+                  Memory leak detection uses 6-hour linear regression.
+                  Results served from background cache (refreshed hourly).
+                </span>
+                <button
+                  id="rec-info-dismiss"
+                  onClick={() => setInfoDismissed(true)}
+                  title="Dismiss"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--muted)',
+                    cursor: 'pointer',
+                    padding: '2px 4px',
+                    flexShrink: 0,
+                    lineHeight: 1,
+                  }}
+                >
+                  <IconClose size={12} />
+                </button>
+              </div>
+            )}
 
             <div className="section-header">
               <div className="section-title">Container Limits</div>
@@ -132,7 +177,7 @@ export default function Recommendations() {
 
             {data.recommendations.length === 0 ? (
               <div className="empty-state">
-                <div className="empty-icon">💡</div>
+                <div className="empty-icon"><IconEmptyBox size={28} /></div>
                 <div className="empty-title">No recommendations yet</div>
                 <div className="empty-sub">
                   Recommendations require at least 10 historical samples per container.
