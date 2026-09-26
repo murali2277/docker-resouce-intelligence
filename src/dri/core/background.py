@@ -11,7 +11,7 @@ on each request.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
 from ..utils.logger import get_logger
@@ -100,7 +100,7 @@ class RecommendationCacheWorker:
             return
 
         logger.info(f"Refreshing cache for {len(container_ids)} container(s)")
-        computed_at = datetime.utcnow()
+        computed_at = datetime.now(timezone.utc)
 
         for cid in container_ids:
             window = self.aggregator._windows.get(cid)

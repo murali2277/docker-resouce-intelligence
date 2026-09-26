@@ -2,8 +2,8 @@
 
 import asyncio
 import json
-from datetime import datetime, timedelta
-from typing import List, Optional, Dict, Any
+from datetime import datetime, timedelta, timezone
+from typing import List, Optional, Dict, Any, cast
 from contextlib import asynccontextmanager
 
 import sqlalchemy as sa
@@ -61,8 +61,8 @@ class Container(Base):
     id = Column(String(12), primary_key=True)
     name = Column(String(256), unique=True)
     image = Column(String(256))
-    created_at = Column(DateTime, default=datetime.utcnow)
-    last_seen = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    last_seen = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     is_active = Column(Boolean, default=True)
 
 
@@ -234,11 +234,14 @@ class TimescaleStorage(StorageBackend):
             loop = asyncio.get_running_loop()
 
             def _get() -> List[MetricsSample]:
-                cutoff = datetime.utcnow() - timedelta(minutes=minutes)
-                return session.query(MetricsSample).filter(
-                    MetricsSample.container_id == container_id,
-                    MetricsSample.timestamp >= cutoff,
-                ).order_by(MetricsSample.timestamp).all()
+                cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+                return cast(
+                    List[MetricsSample],
+                    session.query(MetricsSample).filter(
+                        MetricsSample.container_id == container_id,
+                        MetricsSample.timestamp >= cutoff,
+                    ).order_by(MetricsSample.timestamp).all(),
+                )
 
             return await loop.run_in_executor(None, _get)
 
@@ -299,12 +302,12 @@ class TimescaleStorage(StorageBackend):
             loop = asyncio.get_running_loop()
 
             def _cleanup() -> int:
-                cutoff = datetime.utcnow() - timedelta(hours=retention_hours)
+                cutoff = datetime.now(timezone.utc) - timedelta(hours=retention_hours)
                 deleted = session.query(MetricsSample).filter(
                     MetricsSample.timestamp < cutoff
                 ).delete()
                 session.commit()
-                return deleted
+                return int(deleted)
 
             try:
                 deleted = await loop.run_in_executor(None, _cleanup)
@@ -323,12 +326,13 @@ class TimescaleStorage(StorageBackend):
             loop = asyncio.get_running_loop()
 
             def _get() -> List[AlertRecord]:
-                return (
+                return cast(
+                    List[AlertRecord],
                     session.query(AlertRecord)
                     .order_by(AlertRecord.timestamp.desc())
                     .offset(offset)
                     .limit(limit)
-                    .all()
+                    .all(),
                 )
 
             return await loop.run_in_executor(None, _get)
@@ -343,12 +347,13 @@ class TimescaleStorage(StorageBackend):
             loop = asyncio.get_running_loop()
 
             def _get() -> List[ActionRecord]:
-                return (
+                return cast(
+                    List[ActionRecord],
                     session.query(ActionRecord)
                     .order_by(ActionRecord.timestamp.desc())
                     .offset(offset)
                     .limit(limit)
-                    .all()
+                    .all(),
                 )
 
             return await loop.run_in_executor(None, _get)
@@ -359,7 +364,7 @@ class TimescaleStorage(StorageBackend):
             loop = asyncio.get_running_loop()
 
             def _count() -> int:
-                return session.query(AlertRecord).count()
+                return int(session.query(AlertRecord).count())
 
             try:
                 return await loop.run_in_executor(None, _count)
@@ -373,7 +378,7 @@ class TimescaleStorage(StorageBackend):
             loop = asyncio.get_running_loop()
 
             def _count() -> int:
-                return session.query(ActionRecord).count()
+                return int(session.query(ActionRecord).count())
 
             try:
                 return await loop.run_in_executor(None, _count)
@@ -403,16 +408,16 @@ class TimescaleStorage(StorageBackend):
                     cname = getattr(event, "container_name", "")
                     etype = getattr(event, "event_type", "")
                     action = getattr(event, "action", "")
-                    ts = getattr(event, "timestamp", datetime.utcnow())
+                    ts = getattr(event, "timestamp", datetime.now(timezone.utc))
                     attrs = getattr(event, "attributes", {})
 
                 if isinstance(ts, str):
                     try:
                         ts = datetime.fromisoformat(ts)
                     except ValueError:
-                        ts = datetime.utcnow()
+                        ts = datetime.now(timezone.utc)
                 elif ts is None:
-                    ts = datetime.utcnow()
+                    ts = datetime.now(timezone.utc)
 
                 event_id = str(uuid.uuid4())
                 record = DockerEventRecord(
@@ -448,11 +453,12 @@ class TimescaleStorage(StorageBackend):
                 query = session.query(DockerEventRecord)
                 if container_id:
                     query = query.filter(DockerEventRecord.container_id == container_id)
-                return (
+                return cast(
+                    List[DockerEventRecord],
                     query.order_by(DockerEventRecord.timestamp.desc())
                     .offset(offset)
                     .limit(limit)
-                    .all()
+                    .all(),
                 )
 
             return await loop.run_in_executor(None, _get)
@@ -466,7 +472,7 @@ class TimescaleStorage(StorageBackend):
                 query = session.query(DockerEventRecord)
                 if container_id:
                     query = query.filter(DockerEventRecord.container_id == container_id)
-                return query.count()
+                return int(query.count())
 
             try:
                 return await loop.run_in_executor(None, _count)
@@ -513,15 +519,18 @@ class TimescaleStorage(StorageBackend):
             loop = asyncio.get_running_loop()
 
             def _get() -> Optional[RecommendationCache]:
-                return session.query(RecommendationCache).filter_by(
-                    container_id=container_id
-                ).first()
+                return cast(
+                    Optional[RecommendationCache],
+                    session.query(RecommendationCache).filter_by(
+                        container_id=container_id
+                    ).first(),
+                )
 
             try:
                 row = await loop.run_in_executor(None, _get)
                 if row is None:
                     return None
-                data = json.loads(row.payload)
+                data: Dict[str, Any] = dict(json.loads(cast(str, row.payload)))
                 data["computed_at"] = row.computed_at.isoformat()
                 return data
             except Exception as e:
@@ -534,13 +543,13 @@ class TimescaleStorage(StorageBackend):
             loop = asyncio.get_running_loop()
 
             def _get() -> List[RecommendationCache]:
-                return session.query(RecommendationCache).all()
+                return cast(List[RecommendationCache], session.query(RecommendationCache).all())
 
             try:
                 rows = await loop.run_in_executor(None, _get)
                 results = []
                 for row in rows:
-                    data = json.loads(row.payload)
+                    data: Dict[str, Any] = dict(json.loads(cast(str, row.payload)))
                     data["computed_at"] = row.computed_at.isoformat()
                     results.append(data)
                 return results
@@ -597,17 +606,20 @@ class TimescaleStorage(StorageBackend):
             loop = asyncio.get_running_loop()
 
             def _get() -> Optional[ForecastCache]:
-                return session.query(ForecastCache).filter_by(
-                    container_id=container_id,
-                    metric=metric,
-                    horizon_hours=horizon_hours,
-                ).first()
+                return cast(
+                    Optional[ForecastCache],
+                    session.query(ForecastCache).filter_by(
+                        container_id=container_id,
+                        metric=metric,
+                        horizon_hours=horizon_hours,
+                    ).first(),
+                )
 
             try:
                 row = await loop.run_in_executor(None, _get)
                 if row is None:
                     return None
-                data = json.loads(row.payload)
+                data: Dict[str, Any] = dict(json.loads(cast(str, row.payload)))
                 data["computed_at"] = row.computed_at.isoformat()
                 return data
             except Exception as e:

@@ -4,7 +4,7 @@ import asyncio
 import json
 import time
 from typing import Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import aiohttp
 
 from .logger import get_logger
@@ -125,7 +125,7 @@ class WebhookDispatcher:
             default_headers.update(headers)
 
         webhook_payload = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "event_type": event_type,
             "data": payload,
         }

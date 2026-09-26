@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Literal, Union
 
 import numpy as np
@@ -24,7 +24,7 @@ MIN_SAMPLES = 15
 
 # Try to import statsmodels for SES
 try:
-    from statsmodels.tsa.holtwinters import SimpleExpSmoothing
+    from statsmodels.tsa.holtwinters import SimpleExpSmoothing  # type: ignore
     _HAS_STATSMODELS = True
 except ImportError:
     _HAS_STATSMODELS = False
@@ -185,7 +185,7 @@ class MetricsForecaster:
             predicted_value=predicted,
             confidence_low=conf_low,
             confidence_high=conf_high,
-            predicted_at=datetime.utcnow() + timedelta(hours=horizon_hours),
+            predicted_at=datetime.now(timezone.utc) + timedelta(hours=horizon_hours),
             method_used=method,
             sample_count=n,
         )
