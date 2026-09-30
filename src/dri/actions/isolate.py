@@ -64,10 +64,7 @@ class IsolateAction:
         try:
             result = await loop.run_in_executor(None, _apply_isolation)
             logger.info(
-                f"Isolation action completed",
-                container_id=container_id,
-                cpuset=cpuset,
-                success=result["success"],
+                f"Isolation action completed container_id={container_id} cpuset={cpuset} success={result['success']}"
             )
             return result
         except Exception as e:

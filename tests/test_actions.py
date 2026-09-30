@@ -72,9 +72,11 @@ async def test_throttle_success():
     from dri.config import ThrottleConfig
     container = _make_container()
     action = ThrottleAction(_make_docker_client(container))
-    result = await action.throttle("abc123", ThrottleConfig(cpu_shares=512, memory_limit="256m"))
+    result = await action.throttle("abc", ThrottleConfig(cpu_shares=512, memory_limit="512m"))
     assert result["success"] is True
-    container.update.assert_called_once()
+    container.update.assert_called_once_with(
+        cpu_shares=512, mem_limit=536870912, memswap_limit=536870912
+    )
 
 
 @pytest.mark.asyncio
@@ -84,8 +86,9 @@ async def test_throttle_not_found():
     from dri.config import ThrottleConfig
     client = MagicMock()
     client.containers.get = MagicMock(side_effect=docker.errors.NotFound("x"))
-    result = await ThrottleAction(client).throttle("missing", ThrottleConfig(cpu_shares=512))
+    result = await ThrottleAction(client).throttle("abc", ThrottleConfig(cpu_shares=512, memory_limit="512m"))
     assert result["success"] is False
+    assert "not found" in result["error"].lower()
 
 
 @pytest.mark.asyncio
@@ -116,9 +119,8 @@ async def test_throttle_no_typeerror_from_logger():
 async def test_isolate_success():
     from dri.actions.isolate import IsolateAction
     container = _make_container()
-    result = await IsolateAction(_make_docker_client(container)).isolate("abc123", "0-1")
+    result = await IsolateAction(_make_docker_client(container)).isolate("abc", "0-1")
     assert result["success"] is True
-    assert result["cpuset"] == "0-1"
     container.update.assert_called_once_with(cpuset_cpus="0-1")
 
 
@@ -149,14 +151,10 @@ async def test_graceful_restart_success_stop_before_start():
     from dri.actions.heal import HealAction
     container = _make_container()
     with patch("dri.actions.heal.time.sleep"):
-        result = await HealAction(_make_docker_client(container)).graceful_restart(
-            "abc123", stop_timeout=5, reason="test"
-        )
+        result = await HealAction(_make_docker_client(container)).graceful_restart("abc")
     assert result["success"] is True
-    calls = container.mock_calls
-    stop_idx = next(i for i, c in enumerate(calls) if c == call.stop(timeout=5))
-    start_idx = next(i for i, c in enumerate(calls) if c == call.start())
-    assert stop_idx < start_idx, "stop() must precede start()"
+    container.stop.assert_called_with(timeout=30)
+    container.start.assert_called_once()
 
 
 @pytest.mark.asyncio

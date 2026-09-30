@@ -98,6 +98,10 @@ class HealAction:
             try:
                 container = self.client.containers.get(container_id)
 
+                logger.info(
+                    f"Gracefully restarted container container_id={container_id} reason={reason}"
+                )
+
                 # Stop container gracefully
                 container.stop(timeout=stop_timeout)
 
@@ -106,12 +110,6 @@ class HealAction:
 
                 # Restart container
                 container.start()
-
-                logger.info(
-                    "Gracefully restarted container",
-                    container_id=container_id,
-                    reason=reason,
-                )
 
                 return {
                     "success": True,
@@ -133,9 +131,7 @@ class HealAction:
         try:
             result = await loop.run_in_executor(None, _restart)
             logger.info(
-                "Restart action completed",
-                container_id=container_id,
-                success=result["success"],
+                f"Restart action completed container_id={container_id} success={result['success']}"
             )
             return result
         except Exception as e:

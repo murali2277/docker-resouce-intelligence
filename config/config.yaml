@@ -81,6 +81,12 @@ global_policy:
       duration_seconds: 60
       action: "warning"
 
+    - metric: "cpu"
+      operator: ">="
+      value: 50.0
+      duration_seconds: 15
+      action: "throttle"
+
     - metric: "memory_growth_rate_5m"
       operator: ">"
       value: 20.0

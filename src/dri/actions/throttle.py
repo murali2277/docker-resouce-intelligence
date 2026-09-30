@@ -58,7 +58,7 @@ class ThrottleAction:
                     update_params["memswap_limit"] = self._parse_memory_limit(
                         config.memory_limit
                     )
-                    update_params["memory"] = self._parse_memory_limit(
+                    update_params["mem_limit"] = self._parse_memory_limit(
                         config.memory_limit
                     )
 
@@ -94,9 +94,7 @@ class ThrottleAction:
         try:
             result = await loop.run_in_executor(None, _apply_throttle)
             logger.info(
-                f"Throttle action completed",
-                container_id=container_id,
-                success=result["success"],
+                f"Throttle action completed container_id={container_id} success={result['success']}"
             )
             return result
         except Exception as e:
