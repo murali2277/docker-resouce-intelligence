@@ -1,29 +1,32 @@
 # Multi-stage Dockerfile for DRI Agent
 
-# Build stage
-FROM python:3.11-slim as builder
+# Build stage — python:3.11-slim is already in the local Docker cache.
+# numpy, scipy, and all other dependencies are installed via pre-built
+# manylinux2014 wheels on linux/amd64, so no gcc/python3-dev is required.
+FROM python:3.11-slim AS builder
 
 WORKDIR /build
-
-# Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
 
 # Copy project files needed for packaging
 COPY requirements.txt pyproject.toml ./
 COPY src/ ./src/
 
-# Install dependencies and the dri package itself
-RUN pip install --no-cache-dir --user -r requirements.txt && \
-    pip install --no-cache-dir --user .
+# Upgrade pip so it resolves manylinux platform tags correctly (pip 24 inside
+# the base image can fail with "from versions: none" on a slow/interrupted
+# PyPI connection — upgrading pip and setting --timeout 120 prevents that).
+# Install numpy first so scipy's dependency resolver finds it immediately.
+RUN pip install --no-cache-dir --timeout 120 --upgrade pip && \
+    pip install --no-cache-dir --timeout 120 "numpy>=1.24.0" && \
+    pip install --no-cache-dir --timeout 120 --user -r requirements.txt && \
+    pip install --no-cache-dir --timeout 120 --user .
 
 # Runtime stage
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install runtime dependencies (minimal)
+# Install ca-certificates for HTTPS webhook calls.
+# This layer is cached as long as the Dockerfile doesn't change.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*

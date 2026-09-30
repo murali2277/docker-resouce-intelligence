@@ -136,22 +136,33 @@ class DockerStatsCollector:
             return None
 
     def _parse_stats(self, container: Container, stats: Dict[str, Any]) -> Optional[ContainerMetrics]:
-        """Parse Docker stats response into ContainerMetrics."""
+        """Parse Docker stats response into ContainerMetrics.
+
+        Docker Desktop (cgroup v2) may return explicit JSON ``null`` for any of
+        the sub-keys below even though the key itself is present in the payload.
+        ``dict.get(key, default)`` only substitutes the default when the key is
+        *missing*; a key present with value ``None`` returns ``None``, which
+        then crashes subsequent ``.values()`` / iteration calls.
+
+        Every sub-dict / sub-list access is therefore guarded with ``or {}`` /
+        ``or []`` so that an explicit ``null`` falls through to the safe default.
+        """
         try:
             # CPU calculation
-            cpu_stats = stats.get("cpu_stats", {})
-            precpu_stats = stats.get("precpu_stats", {})
+            cpu_stats    = stats.get("cpu_stats")    or {}
+            precpu_stats = stats.get("precpu_stats") or {}
 
-            cpu_usage = cpu_stats.get("cpu_usage", {})
-            precpu_usage = precpu_stats.get("cpu_usage", {})
+            cpu_usage    = cpu_stats.get("cpu_usage")    or {}
+            precpu_usage = precpu_stats.get("cpu_usage") or {}
 
-            current_cpu = cpu_usage.get("total_usage", 0)
-            previous_cpu = precpu_usage.get("total_usage", 0)
+            current_cpu  = cpu_usage.get("total_usage", 0)    or 0
+            previous_cpu = precpu_usage.get("total_usage", 0) or 0
 
-            current_system = cpu_stats.get("system_cpu_usage", 0)
-            previous_system = precpu_stats.get("system_cpu_usage", 0)
+            current_system  = cpu_stats.get("system_cpu_usage", 0)    or 0
+            previous_system = precpu_stats.get("system_cpu_usage", 0) or 0
 
-            cpu_count = cpu_stats.get("online_cpus") or len(cpu_usage.get("percpu_usage", []) or [1])
+            percpu_usage = cpu_usage.get("percpu_usage") or []
+            cpu_count = cpu_stats.get("online_cpus") or len(percpu_usage) or 1
 
             cpu_percent = 0.0
             if previous_system > 0:
@@ -161,36 +172,40 @@ class DockerStatsCollector:
                 if system_delta > 0 and cpu_delta >= 0:
                     cpu_percent = (cpu_delta / system_delta) * cpu_count * 100.0
 
-
             # Memory calculation
-            mem_stats = stats.get("memory_stats", {})
-            raw_usage = mem_stats.get("usage", 0)
-            detail = mem_stats.get("stats", {})
-            cache = detail.get("cache", detail.get("inactive_file", 0))
-            memory_usage = max(0, raw_usage - cache)
-            memory_limit = mem_stats.get("limit", 0)
+            mem_stats = stats.get("memory_stats") or {}
+            raw_usage = mem_stats.get("usage", 0) or 0
+            detail    = mem_stats.get("stats")    or {}
+            cache     = detail.get("cache", detail.get("inactive_file", 0)) or 0
+            memory_usage  = max(0, raw_usage - cache)
+            memory_limit  = mem_stats.get("limit", 0) or 0
             memory_percent = 0.0
 
-            # Guard against unrealistically huge memory_limit (e.g. 9223372036854771712 for unlimited containers).
-            # We cap/set memory_percent to 0.0 when memory_limit exceeds 1 PB (1 << 50 bytes), since percentage
-            # of an unlimited memory pool is meaningless. Raw memory_usage is preserved so it remains useful in UI.
+            # Guard against unrealistically huge memory_limit (e.g. 9223372036854771712 for unlimited
+            # containers). We set memory_percent to 0.0 when limit exceeds 1 PB because the percentage
+            # of an unlimited memory pool is meaningless. Raw memory_usage is preserved for the UI.
             UNLIMITED_MEMORY_THRESHOLD = 1 << 50
             if 0 < memory_limit < UNLIMITED_MEMORY_THRESHOLD:
                 memory_percent = (memory_usage / memory_limit) * 100.0
 
-            # Network I/O
-            networks = stats.get("networks", {})
-            net_io_in = sum(n.get("rx_bytes", 0) for n in networks.values())
-            net_io_out = sum(n.get("tx_bytes", 0) for n in networks.values())
+            # Network I/O — ``networks`` is None on host-network containers and
+            # on Docker Desktop with certain network drivers.
+            networks  = stats.get("networks") or {}
+            net_io_in  = sum(n.get("rx_bytes", 0) or 0 for n in networks.values())
+            net_io_out = sum(n.get("tx_bytes", 0) or 0 for n in networks.values())
 
-            # Block I/O
-            blkio_stats = stats.get("blkio_stats", {})
-            io_service_bytes = blkio_stats.get("io_service_bytes_recursive", [])
-            block_io_read = sum(x.get("value", 0) for x in io_service_bytes if x.get("op") == "Read")
-            block_io_write = sum(x.get("value", 0) for x in io_service_bytes if x.get("op") == "Write")
+            # Block I/O — ``io_service_bytes_recursive`` is None on cgroup v2.
+            blkio_stats      = stats.get("blkio_stats") or {}
+            io_service_bytes = blkio_stats.get("io_service_bytes_recursive") or []
+            block_io_read  = sum(
+                x.get("value", 0) or 0 for x in io_service_bytes if x.get("op") == "Read"
+            )
+            block_io_write = sum(
+                x.get("value", 0) or 0 for x in io_service_bytes if x.get("op") == "Write"
+            )
 
-            # PIDs
-            pids = stats.get("pids_stats", {}).get("current", 0)
+            # PIDs — ``pids_stats`` is None on some kernels.
+            pids = (stats.get("pids_stats") or {}).get("current", 0) or 0
 
             return ContainerMetrics(
                 container_id=(container.id or "")[:12],
@@ -208,7 +223,7 @@ class DockerStatsCollector:
                 pids=pids,
             )
         except Exception as e:
-            logger.error(f"Failed to parse stats: {e}")
+            logger.error(f"Failed to parse stats for {container.name}: {e}", exc_info=True)
             return None
 
     async def stream_metrics(self, interval: int = 5) -> AsyncIterator[ContainerMetrics]:

@@ -417,3 +417,78 @@ async def test_agent_metrics_processed_integration():
     assert agent.metrics_processed == 3
     assert agent.aggregator.metrics_processed == 3
 
+
+# ---------------------------------------------------------------------------
+# _parse_stats — null-value resilience (Docker Desktop / cgroup v2)
+# ---------------------------------------------------------------------------
+
+
+def test_parse_stats_null_fields_do_not_raise():
+    """
+    Docker Desktop and cgroup v2 hosts return explicit JSON null for several
+    stats sub-keys even though the keys are present in the payload.
+    ``dict.get(k, default)`` does NOT substitute the default for null — it
+    returns None, which then crashes .values() / iteration.
+
+    This test verifies that _parse_stats survives a payload where
+    ``networks``, ``pids_stats``, ``blkio_stats.io_service_bytes_recursive``,
+    and ``memory_stats.stats`` are all None, and produces a valid
+    ContainerMetrics with all affected counters == 0.
+    """
+    from dri.core.collector import DockerStatsCollector
+
+    collector = DockerStatsCollector()
+
+    container_mock = MagicMock()
+    container_mock.id = "abc123def456789"
+    container_mock.name = "cpu-hog"
+
+    # Minimal valid CPU payload so cpu_percent is computable
+    cpu_total = 49_409_216_000
+    sys_usage = 1_000_000_000_000
+
+    stats_payload = {
+        "cpu_stats": {
+            "cpu_usage": {
+                "total_usage": cpu_total,
+                "percpu_usage": [cpu_total],
+            },
+            "system_cpu_usage": sys_usage,
+            "online_cpus": 2,
+        },
+        "precpu_stats": {
+            "cpu_usage": {
+                "total_usage": cpu_total - 1_000_000,
+                "percpu_usage": [cpu_total - 1_000_000],
+            },
+            "system_cpu_usage": sys_usage - 10_000_000,
+            "online_cpus": 2,
+        },
+        # memory_stats present but stats sub-key is null
+        "memory_stats": {
+            "usage": 1024,
+            "limit": 2048,
+            "stats": None,       # <-- explicit null
+        },
+        "networks": None,        # <-- explicit null (host-network or Docker Desktop)
+        "blkio_stats": {
+            "io_service_bytes_recursive": None,  # <-- explicit null (cgroup v2)
+        },
+        "pids_stats": None,      # <-- explicit null (some kernels)
+    }
+
+    result = collector._parse_stats(container_mock, stats_payload)
+
+    assert result is not None, (
+        "_parse_stats must not return None for a null-field payload; "
+        "it should gracefully default null fields to 0 / empty."
+    )
+    assert result.block_io_read == 0, f"Expected block_io_read=0, got {result.block_io_read}"
+    assert result.block_io_write == 0, f"Expected block_io_write=0, got {result.block_io_write}"
+    assert result.net_io_in == 0, f"Expected net_io_in=0, got {result.net_io_in}"
+    assert result.net_io_out == 0, f"Expected net_io_out=0, got {result.net_io_out}"
+    assert result.pids == 0, f"Expected pids=0, got {result.pids}"
+    # memory_stats.stats==None: cache defaults to 0, so usage==raw_usage
+    assert result.memory_usage == 1024
+    assert result.memory_limit == 2048
+    assert result.memory_percent == pytest.approx(50.0)
