@@ -35,8 +35,10 @@ def setup_logging(
     console_handler.setLevel(getattr(logging, level.upper()))
 
     if json_format:
+        # Use %(message)s and %(levelname)s — both are real LogRecord fields.
+        # pythonjsonlogger does NOT support %(timestamp)s or %(level)s.
         formatter = jsonlogger.JsonFormatter(
-            "%(timestamp)s %(level)s %(name)s %(message)s"
+            "%(asctime)s %(levelname)s %(name)s %(message)s"
         )
         console_handler.setFormatter(formatter)
     else:
@@ -55,7 +57,7 @@ def setup_logging(
 
         if json_format:
             file_formatter = jsonlogger.JsonFormatter(
-                "%(timestamp)s %(level)s %(name)s %(message)s"
+                "%(asctime)s %(levelname)s %(name)s %(message)s"
             )
             file_handler.setFormatter(file_formatter)
         else:
@@ -67,34 +69,49 @@ def setup_logging(
 
 
 class ContextLogger:
-    """Logger with contextual information."""
+    """Logger that accepts arbitrary keyword context without raising TypeError.
+
+    Standard ``logging.Logger`` raises ``TypeError`` when unknown keyword
+    arguments are passed (e.g. ``logger.info("msg", container_id="x")``).
+    This wrapper intercepts those kwargs, merges them with a persistent
+    context dict, and formats them into the log message so the output is
+    still human-readable without requiring a JSON formatter.
+    """
 
     def __init__(self, name: str, context: Optional[dict] = None):
         self.logger = logging.getLogger(name)
         self.context = context or {}
 
-    def _add_context(self, data: Any) -> Any:
-        """Add context to log data."""
-        if isinstance(data, dict):
-            return {**self.context, **data}
-        return {**self.context, "message": data}
+    def _format(self, msg: Any, kwargs: dict) -> str:
+        """Merge context + kwargs into the message string."""
+        merged = {**self.context, **kwargs}
+        if merged:
+            extras = " ".join(f"{k}={v!r}" for k, v in merged.items())
+            return f"{msg} [{extras}]"
+        return str(msg)
 
     def debug(self, msg: Any, **kwargs: Any) -> None:
-        self.logger.debug(self._add_context(kwargs or msg))
+        self.logger.debug(self._format(msg, kwargs))
 
     def info(self, msg: Any, **kwargs: Any) -> None:
-        self.logger.info(self._add_context(kwargs or msg))
+        self.logger.info(self._format(msg, kwargs))
 
     def warning(self, msg: Any, **kwargs: Any) -> None:
-        self.logger.warning(self._add_context(kwargs or msg))
+        self.logger.warning(self._format(msg, kwargs))
 
     def error(self, msg: Any, **kwargs: Any) -> None:
-        self.logger.error(self._add_context(kwargs or msg))
+        self.logger.error(self._format(msg, kwargs))
 
     def critical(self, msg: Any, **kwargs: Any) -> None:
-        self.logger.critical(self._add_context(kwargs or msg))
+        self.logger.critical(self._format(msg, kwargs))
 
 
-def get_logger(name: str) -> logging.Logger:
-    """Get a logger instance by name."""
-    return logging.getLogger(f"dri.{name}")
+def get_logger(name: str) -> "ContextLogger":
+    """Get a ContextLogger instance by name.
+
+    Returns a :class:`ContextLogger` (not a bare ``logging.Logger``) so that
+    callers can safely pass keyword arguments such as
+    ``logger.info("msg", container_id="x", success=True)`` without raising
+    ``TypeError``.
+    """
+    return ContextLogger(f"dri.{name}")

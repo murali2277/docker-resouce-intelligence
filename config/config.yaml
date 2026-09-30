@@ -13,7 +13,7 @@ container_status_interval: 15
 container_status_cleanup_minutes: 5
 
 storage:
-  sqlite_path: "metrics.db"
+  sqlite_path: "/var/lib/dri/metrics.db"
 
   # retention_hours controls how long raw metric samples are kept in SQLite.
   #

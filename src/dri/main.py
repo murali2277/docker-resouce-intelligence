@@ -87,6 +87,12 @@ class DRIAgent:
         self.restart_counts: dict[str, int] = {}
         self._container_died: set[str] = set()
 
+        # Per-(container_id, rule_key) action cooldown to prevent repeating
+        # the same throttle/isolate/restart/webhook every policy-check tick.
+        # Key: (container_id, alert_type, metric), Value: last-fired timestamp.
+        self._action_cooldowns: dict[tuple, datetime] = {}
+        self._ACTION_COOLDOWN_SECONDS: int = 120  # 2 minutes between repeats
+
     @property
     def metrics_processed(self) -> int:
         """Total metrics processed by the agent."""
@@ -270,6 +276,23 @@ class DRIAgent:
     async def _handle_alert_action(self, alert) -> None:
         """Handle actions triggered by alerts."""
         try:
+            # ----------------------------------------------------------------
+            # Per-(container, alert_type, metric) cooldown — prevent the same
+            # action from firing on every policy-check tick once a threshold
+            # is continuously exceeded.
+            # ----------------------------------------------------------------
+            cooldown_key = (alert.container_id, alert.alert_type, alert.metric)
+            now = datetime.now(timezone.utc)
+            last_fired = self._action_cooldowns.get(cooldown_key)
+            if last_fired is not None:
+                elapsed = (now - last_fired).total_seconds()
+                if elapsed < self._ACTION_COOLDOWN_SECONDS:
+                    return  # still within cooldown, skip
+            self._action_cooldowns[cooldown_key] = now
+
+            action: Optional[Action] = None
+            result: dict = {"success": False, "error": "no handler matched"}
+
             if alert.alert_type == "throttle":
                 # Apply throttling
                 if self.throttle_action and self.config.actions.throttle:
@@ -277,20 +300,17 @@ class DRIAgent:
                         alert.container_id,
                         self.config.actions.throttle,
                     )
-                    if result["success"]:
-                        self.actions_executed += 1
-                        action = Action(
-                            action_id=str(alert.alert_id),
-                            container_id=alert.container_id,
-                            container_name=alert.container_name,
-                            timestamp=datetime.now(timezone.utc),
-                            action_type="throttle",
-                            reason=alert.message,
-                            details=result,
-                            success=True,
-                        )
-                        if self.storage:
-                            await self.storage.save_action(action)
+                    action = Action(
+                        action_id=str(alert.alert_id),
+                        container_id=alert.container_id,
+                        container_name=alert.container_name,
+                        timestamp=now,
+                        action_type="throttle",
+                        reason=alert.message,
+                        details=result,
+                        success=result["success"],
+                        error_message=result.get("error"),
+                    )
 
             elif alert.alert_type == "isolate":
                 # Apply CPU isolation
@@ -299,20 +319,37 @@ class DRIAgent:
                         alert.container_id,
                         self.config.actions.isolate_cpuset,
                     )
-                    if result["success"]:
-                        self.actions_executed += 1
-                        action = Action(
-                            action_id=str(alert.alert_id),
-                            container_id=alert.container_id,
-                            container_name=alert.container_name,
-                            timestamp=datetime.now(timezone.utc),
-                            action_type="isolate",
-                            reason=alert.message,
-                            details=result,
-                            success=True,
-                        )
-                        if self.storage:
-                            await self.storage.save_action(action)
+                    action = Action(
+                        action_id=str(alert.alert_id),
+                        container_id=alert.container_id,
+                        container_name=alert.container_name,
+                        timestamp=now,
+                        action_type="isolate",
+                        reason=alert.message,
+                        details=result,
+                        success=result["success"],
+                        error_message=result.get("error"),
+                    )
+
+            elif alert.alert_type == "restart":
+                # Graceful container restart
+                if self.heal_action:
+                    result = await self.heal_action.graceful_restart(
+                        alert.container_id,
+                        stop_timeout=self.config.actions.restart_grace_period,
+                        reason=alert.message,
+                    )
+                    action = Action(
+                        action_id=str(alert.alert_id),
+                        container_id=alert.container_id,
+                        container_name=alert.container_name,
+                        timestamp=now,
+                        action_type="restart",
+                        reason=alert.message,
+                        details=result,
+                        success=result["success"],
+                        error_message=result.get("error"),
+                    )
 
             elif alert.alert_type == "webhook":
                 # Trigger webhook
@@ -322,8 +359,25 @@ class DRIAgent:
                         "resource_alert",
                         alert.to_dict(),
                     )
-                    if success:
-                        self.actions_executed += 1
+                    result = {"success": success}
+                    action = Action(
+                        action_id=str(alert.alert_id),
+                        container_id=alert.container_id,
+                        container_name=alert.container_name,
+                        timestamp=now,
+                        action_type="webhook",
+                        reason=alert.message,
+                        details=result,
+                        success=success,
+                        error_message=None if success else "webhook dispatch failed",
+                    )
+
+            # Persist the action record (success OR failure) so history is
+            # always complete and the dashboard can surface failed actions.
+            if action is not None and self.storage:
+                await self.storage.save_action(action)
+                if action.success:
+                    self.actions_executed += 1
 
         except Exception as e:
             logger_module.error(f"Failed to handle alert action: {e}")
@@ -513,12 +567,22 @@ async def main():
 
     args = parser.parse_args()
 
-    # Setup logging
-    setup_logging(level=args.log_level)
+    # DRI_LOG_LEVEL env var overrides --log-level default (but CLI wins over env)
+    import os
+    log_level = args.log_level
+    if log_level == "INFO":  # i.e. user didn't explicitly pass --log-level
+        log_level = os.environ.get("DRI_LOG_LEVEL", "INFO")
 
-    # Load configuration
+    # Load configuration first so log_json / log_file from config are applied
     config = load_config(args.config)
     config.api.port = args.api_port
+
+    # Re-apply logging with config values (config wins for json/file settings)
+    setup_logging(
+        level=config.log_level if config.log_level else log_level,
+        json_format=config.log_json,
+        log_file=config.log_file,
+    )
 
     # Initialize and run agent
     agent = DRIAgent(config)

@@ -6,7 +6,7 @@ aiohttp>=3.9.0
 
 # Database & Storage
 sqlalchemy>=2.0.0
-influxdb-client>=1.18.0
+influxdb-client>=1.18.0  # optional — only used with influxdb storage backend
 # asyncpg>=0.29.0  # Uncomment to enable TimescaleDB backend (pip install .[timescaledb])
 
 # Web Framework & API
@@ -19,6 +19,7 @@ prometheus-client>=0.18.0
 
 # Data processing
 numpy>=1.24.0
+scipy>=1.11.0
 
 # Logging & Utils
 python-json-logger>=2.0.7

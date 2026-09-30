@@ -40,12 +40,15 @@ async def verify_api_key(
 ) -> Optional[str]:
     """FastAPI dependency to verify API key.
 
-    When config.api.api_key is set, checks x_api_key against it and raises
-    HTTPException(401) on mismatch or missing header.
+    When config.api.api_key is set, checks x_api_key against it using
+    secrets.compare_digest (constant-time) to prevent timing attacks, and
+    raises HTTPException(401) on mismatch or missing header.
     When config.api.api_key is None, this is a no-op.
     """
+    import secrets
+
     if _configured_api_key is not None:
-        if not x_api_key or x_api_key != _configured_api_key:
+        if not x_api_key or not secrets.compare_digest(x_api_key, _configured_api_key):
             raise HTTPException(
                 status_code=401,
                 detail="Invalid or missing API key",

@@ -56,9 +56,8 @@ Homepage = "https://github.com/murali2277/docker-resouce-intelligence"
 Repository = "https://github.com/murali2277/docker-resouce-intelligence.git"
 Documentation = "https://github.com/murali2277/docker-resouce-intelligence/tree/main/docs"
 
-[tool.setuptools]
-packages = ["dri"]
-package-dir = {"" = "src"}
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.black]
 line-length = 100
