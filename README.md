@@ -1,25 +1,51 @@
 # Docker Resource Intelligence (DRI)
 
-A lightweight, intelligent monitoring and self-healing agent that tracks, restricts, and optimizes container resource consumption on Docker hosts — preventing "noisy neighbors" and Out-Of-Memory (OOM) crashes.
+**Your containers, watched over, right-sized, and self-healing, with almost no overhead.**
+
+DRI is a lightweight agent that runs beside your Docker daemon, learns how each container actually behaves, and then helps you keep every workload healthy: it catches noisy neighbors, predicts Out-Of-Memory (OOM) crashes before they happen, and tells you exactly what resource limits each container should have.
 
 ---
- 
-## Features
 
-- **Real-Time Metrics** — Stream CPU, memory, I/O, and network stats from Docker containers
-- **Moving Averages** — 5, 15, and 60-minute windows to detect resource trends
-- **Anomaly Detection** — Identify memory spikes and predict OOM conditions before they happen
-- **Policy Engine** — YAML-based rules for per-image and per-container resource limits
+## Why DRI exists
+
+Anyone who has run more than a handful of containers has met the same three problems:
+
+1. **Noisy neighbors.** One greedy container quietly starves the others, and nobody notices until users do.
+2. **Surprise OOM kills.** A slow memory leak or a sudden spike takes a service down at 3 a.m. and the only clue is an exit code of 137.
+3. **Guesswork limits.** CPU and memory limits are usually copied from a blog post or set to "something big", so teams either overpay for idle capacity or get throttled and killed.
+
+Full observability stacks can answer these questions, but they are heavy to deploy and they mostly *show* you graphs. You still have to interpret them and act.
+
+**DRI was built to close that gap with one small agent that observes, decides, and acts:**
+
+- It **measures** every container in real time.
+- It **understands** behavior using moving averages, statistical anomaly detection, leak detection, and forecasting.
+- It **recommends** right-sized limits based on real p95 usage, not guesses.
+- It **acts** by throttling, isolating, or gracefully restarting containers, and notifying you through webhooks, so problems are fixed before they become incidents.
+
+The goal is simple: **fewer pages, fewer wasted resources, and more confidence in your Docker hosts.**
+
+---
+
+## What you get
+
+- **Real-Time Metrics**: CPU, memory, network, block I/O, and PIDs streamed from every running container, collected in parallel so one slow container never blocks the rest.
+- **Trend Awareness**: 5, 15, and 60-minute moving averages backed by a memory + database hybrid, so long windows stay accurate.
+- **Smart Anomaly Detection**: per-container z-score analysis, memory growth-rate spikes, and OOM prediction *before* the kill happens.
+- **Right-Sizing Recommendations**: p95-based CPU and memory limits with a configurable safety margin, confidence tiers, data-completeness reporting, idle (scale-to-zero) detection, and restart-aware memory-leak detection.
+- **Usage Forecasting**: project CPU or memory up to 7 days ahead with confidence intervals (Simple Exponential Smoothing, or linear regression as a zero-dependency fallback).
+- **Policy Engine**: YAML rules with durations, per-image and per-container overrides, and hot-reload.
 - **Automated Actions**:
-  - **Throttle** — Reduce CPU shares/quota and memory limits on offending containers
-  - **Isolate** — Restrict containers to specific CPU sets
-  - **Heal** — Gracefully restart containers before OOM crashes
-  - **Webhooks** — Trigger custom HTTP callbacks on threshold events
-- **REST API** — FastAPI-powered endpoints for metrics, policies, and action history
-- **Dashboard** — React + Vite UI for visualizing container metrics in real time
-- **Prometheus Integration** — Export agent metrics to Prometheus / Grafana
-- **SQLite Storage** — Lightweight local metrics database (optional InfluxDB export)
-- **Docker Event Tracking** — Monitor OOM, die, create, stop, and restart events
+  - **Throttle**: reduce CPU shares/quota and memory limits on offending containers
+  - **Isolate**: pin containers to specific CPU sets
+  - **Heal**: gracefully restart containers before they crash
+  - **Webhooks**: trigger custom HTTP callbacks, protected by a circuit breaker so a dead endpoint is never hammered
+- **Docker Event Tracking**: OOM, die, start, stop, create, and destroy events, plus automatic restart counting.
+- **Container Lifecycle Awareness**: stopped containers are flagged and cleanly evicted after a grace period.
+- **Modern Dashboard**: a React + Vite control-tower UI with seven live views.
+- **REST API**: FastAPI with optional API-key auth, structured JSON errors, and cached recommendations/forecasts for instant responses.
+- **Prometheus Integration**: export agent metrics to Prometheus / Grafana.
+- **Pluggable Storage**: SQLite by default (zero setup), TimescaleDB for production-scale history, optional InfluxDB export.
 
 ---
 
@@ -29,13 +55,15 @@ A lightweight, intelligent monitoring and self-healing agent that tracks, restri
 Docker Daemon
     |
     v
-Stats Collector  -->  Docker Event Listener
-    |
-    v
-Metrics Storage (SQLite)
+Stats Collector (parallel)  -->  Docker Event Listener
+    |                                   |
+    v                                   v
+Metrics Storage (SQLite / TimescaleDB) <-- Events & Restart Tracking
     |
     v
 Aggregator (Moving Averages & Anomaly Detection)
+    |
+    +--> Recommender & Forecaster (background cache worker)
     |
     v
 Policy Engine (Rule Evaluation)
@@ -69,8 +97,9 @@ Prometheus Metrics (:9090)
 ```
 docker-resouce-intelligence/
 ├── src/dri/
-│   ├── core/          # Collector, storage, aggregator, policy engine
-│   ├── actions/       # Throttle, isolate, heal action handlers
+│   ├── core/          # Collector, storage (SQLite/Timescale), aggregator,
+│   │                  # policy engine, recommender, forecaster, cache worker
+│   ├── actions/       # Throttle, isolate, heal, scale action handlers
 │   ├── events/        # Docker event listener
 │   ├── api/           # FastAPI routes, models, server
 │   ├── utils/         # Logger, metrics types, webhooks
@@ -81,8 +110,10 @@ docker-resouce-intelligence/
 ├── dashboard/         # React + Vite frontend
 ├── deployment/
 │   ├── Dockerfile
+│   ├── Dockerfile.dashboard
 │   ├── docker-compose.yml
 │   └── prometheus.yml
+├── docs/              # Guides (e.g. TimescaleDB migration)
 ├── tests/             # Unit & integration tests
 ├── requirements.txt
 └── pyproject.toml
@@ -90,57 +121,41 @@ docker-resouce-intelligence/
 
 ---
 
-## Setup & Run
+## Quick Start
 
-### 1 — Clone the repository
+### 1. Clone the repository
 
 ```bash
 git clone https://github.com/murali2277/docker-resouce-intelligence.git
 cd docker-resouce-intelligence
 ```
 
----
-
-### 2 — Install Python dependencies
-
-> It is recommended to use a virtual environment.
+### 2. Install Python dependencies
 
 ```bash
-# Create and activate a virtual environment (optional but recommended)
 python -m venv .venv
 
 # Windows
 .venv\Scripts\activate
-
 # macOS / Linux
 source .venv/bin/activate
 
-# Install all dependencies
 pip install -r requirements.txt
 ```
 
----
-
-### 3 — Start Prometheus (optional but recommended)
-
-Prometheus is provided as a Docker service. Start it before running the agent so metrics are scraped automatically:
+### 3. Start Prometheus (optional but recommended)
 
 ```bash
 cd deployment
-docker-compose up -d
+docker-compose up -d prometheus
 cd ..
 ```
 
-This starts:
-- `dri-prometheus` — Prometheus on **http://localhost:9090**
+Prometheus will be available at **http://localhost:9090**.
 
-> The `dri-agent` Docker service in `docker-compose.yml` requires a full Docker image build. For local development it is easier to run the agent directly with Python (Step 4).
+### 4. Run the DRI agent
 
----
-
-### 4 — Run the DRI agent
-
-From the **project root**:
+From the project root:
 
 ```bash
 python -m dri.main --config config/config.yaml
@@ -149,11 +164,9 @@ python -m dri.main --config config/config.yaml
 Expected startup output:
 
 ```
-[INFO] dri.config    - Loading config from config\config.yaml
-[INFO] dri.config    - Config loaded successfully
 [INFO] dri.main      - Initializing DRI agent...
 [INFO] dri.main      - Connected to Docker daemon
-[INFO] dri.storage   - Storage initialized at \var\lib\dri\metrics.db
+[INFO] dri.storage   - Storage initialized
 [INFO] dri.collector - Connected to Docker daemon
 [INFO] dri.main      - DRI agent initialized successfully
 [INFO] dri.main      - Starting metrics collection (interval: 5s)
@@ -162,11 +175,9 @@ Expected startup output:
 [INFO] dri.main      - Starting Docker event listener
 ```
 
-The agent REST API is available at **http://localhost:8000**
+The REST API is now live at **http://localhost:8000** (interactive docs at `/docs`).
 
----
-
-### 5 — Run the frontend dashboard
+### 5. Open the dashboard
 
 In a **separate terminal**:
 
@@ -176,33 +187,36 @@ npm install
 npm run dev
 ```
 
-The frontend dashboard opens at **http://localhost:5173** and automatically proxies requests to the backend API at `http://localhost:8000`.
-
-**Four Polling Views:**
-- **Metrics** — live container metrics (`/api/v1/metrics`), polling interval 5–10s
-- **Alerts** — active and acknowledged alert feed (`/api/v1/alerts`), polling interval 5–10s
-- **Action History** — automated action log (`/api/v1/actions/history`), polling interval 5–10s
-- **Policies** — active global & container policy rules (`/api/v1/policies`), polling interval 5–10s
-
-To point the dashboard at a custom backend URL, set `VITE_API_BASE`:
+The dashboard opens at **http://localhost:5173**. To point it at a different backend:
 
 ```bash
-VITE_API_BASE=http://192.168.1.10:8000 npm run dev
+VITE_API_BASE=http://192.168.1.10:8000 VITE_API_KEY=your-api-key npm run dev
 ```
+
+**Dashboard views:**
+
+| View | What it shows |
+|---|---|
+| **Overview** | Agent health, live per-container CPU/memory, I/O, restart counts, anomaly and stopped badges, with a click-through detail panel |
+| **Alert Feed** | Sortable feed of policy violations |
+| **Recommendations** | Right-sized CPU/memory limits, confidence tier, leak and idle signals |
+| **Forecast** | On-demand CPU/memory projection with confidence intervals |
+| **Actions History** | Everything DRI did automatically, and whether it worked |
+| **Docker Events** | OOM / die / start / stop lifecycle stream with search |
+| **Policies** | The active global and per-container rules |
+
+The polling interval (5–60s) is adjustable from the dashboard's Settings panel.
 
 ---
 
-
 ## Full Docker Deployment
 
-To run the **entire stack** (agent + dashboard + Prometheus) as containers:
+Run the **entire stack** (agent + dashboard + Prometheus) as containers:
 
 ```bash
 cd deployment
 docker-compose up -d --build
 ```
-
-The dashboard is now included in the default deployment.
 
 | Service | URL |
 |---|---|
@@ -210,17 +224,13 @@ The dashboard is now included in the default deployment.
 | DRI Agent API | http://localhost:8000 |
 | Prometheus | http://localhost:9090 |
 
-To stop all services:
-
-```bash
-docker-compose down
-```
+Stop everything with `docker-compose down`.
 
 ---
 
 ## Configuration
 
-Edit `config/config.yaml` to customise the agent behaviour.
+Edit `config/config.yaml` to customise the agent.
 
 ```yaml
 log_level: INFO
@@ -229,25 +239,28 @@ log_json: false
 collector_interval: 5       # seconds between metric samples
 aggregator_interval: 10     # seconds between aggregations
 policy_check_interval: 10   # seconds between policy evaluations
+container_status_interval: 15          # poll for stopped/started containers
+container_status_cleanup_minutes: 5    # evict stopped containers after this long
 
 storage:
-  sqlite_path: "/var/lib/dri/metrics.db"
-  retention_hours: 24
-  influxdb_enabled: false   # set true to enable InfluxDB export
+  backend: "sqlite"         # or "timescaledb"
+  sqlite_path: "metrics.db"
+  retention_hours: 168      # keep >= recommender lookback (7 days)
 
 api:
   host: "0.0.0.0"
   port: 8000
   enable_cors: true
+  allowed_origins: ["*"]    # set explicit origins in production
   prometheus_metrics: true
-  api_key: null             # set a secret key string to require X-Api-Key authentication
+  api_key: null             # set a secret to require X-Api-Key
 
 actions:
   throttle:
     cpu_shares: 512
     memory_limit: "512m"
   isolate_cpuset: "0-1"
-  webhook_url: null         # set a URL to receive alert payloads
+  webhook_url: null
   restart_grace_period: 30
 
 global_policy:
@@ -260,12 +273,20 @@ global_policy:
       duration_seconds: 60
       action: "warning"
 
+    - metric: "memory_growth_rate_5m"
+      operator: ">"
+      value: 20.0
+      duration_seconds: 30
+      action: "warning"
+
     - metric: "memory"
       operator: ">="
       value: 95.0
       duration_seconds: 10
       action: "throttle"
 ```
+
+Available policy metrics: `cpu`, `cpu_5m`, `cpu_15m`, `cpu_60m`, `memory`, `memory_5m`, `memory_15m`, `memory_60m`, `memory_growth_rate_1m`, `memory_growth_rate_5m`.
 
 ### Per-container policy example
 
@@ -291,44 +312,29 @@ Base URL: `http://localhost:8000`
 
 ### Authentication
 
-By default (`api_key: null`), authentication is disabled to preserve seamless local development.
+By default (`api_key: null`) authentication is off, which keeps local development frictionless. For any non-localhost deployment, set `api.api_key`. Then all `/api/v1/*` data endpoints and `/metrics` require an `X-Api-Key` header and return `401` otherwise. Health endpoints stay open so liveness probes keep working.
 
-For non-localhost or production deployments, configure `api.api_key` in `config/config.yaml` (or pass it via configuration). When configured:
-- All `/api/v1/*` data endpoints and the `/metrics` Prometheus endpoint require the `X-Api-Key` header.
-- Requests with missing or invalid keys return `401 Unauthorized`.
-- Health check endpoints (`/health` and `/api/v1/health`) remain unauthenticated so container liveness probes and Docker healthchecks continue to work without credentials.
-
-| Method | Endpoint | Auth Required | Description |
+| Method | Endpoint | Auth | Description |
 |---|---|---|---|
-| `GET` | `/health` | No | Agent health check (unauthenticated for probes) |
-| `GET` | `/api/v1/health` | No | Agent health check |
-| `GET` | `/api/v1/metrics` | When configured | Current metrics for all containers |
-| `GET` | `/api/v1/metrics?container_id=<id>` | When configured | Metrics for a specific container |
-| `GET` | `/api/v1/alerts` | When configured | Recent triggered alerts |
-| `GET` | `/api/v1/actions/history` | When configured | Action execution history |
+| `GET` | `/health`, `/api/v1/health` | No | Agent health and live counters |
+| `GET` | `/api/v1/metrics[?container_id=<id>]` | When configured | Current metrics for all (or one) container |
+| `GET` | `/api/v1/alerts` | When configured | Recent triggered alerts (paginated) |
+| `GET` | `/api/v1/actions/history` | When configured | Action execution history (paginated) |
+| `GET` | `/api/v1/events` | When configured | Docker lifecycle events (paginated, filterable) |
 | `GET` | `/api/v1/policies` | When configured | Active policies |
-| `GET` | `/api/v1/forecast/<container_id>` | When configured | Resource usage forecast |
+| `GET` | `/api/v1/recommendations` | When configured | Right-sized limits per container (cached; `?force=true` to recompute) |
+| `GET` | `/api/v1/forecast/<container_id>` | When configured | Usage forecast (cached; `?force=true` to recompute) |
 | `GET` | `/metrics` | When configured | Prometheus-format metrics |
 
 ### Quick examples
 
 ```bash
-# Health check (unauthenticated)
 curl http://localhost:8000/health
-curl http://localhost:8000/api/v1/health
 
-# When api_key is configured:
-# All container metrics
-curl -H "X-Api-Key: your-secret-api-key" http://localhost:8000/api/v1/metrics
-
-# Filter by container ID (first 12 chars)
-curl -H "X-Api-Key: your-secret-api-key" "http://localhost:8000/api/v1/metrics?container_id=abc123def456"
-
-# Recent alerts
-curl -H "X-Api-Key: your-secret-api-key" http://localhost:8000/api/v1/alerts
-
-# Prometheus scrape endpoint
-curl -H "X-Api-Key: your-secret-api-key" http://localhost:8000/metrics
+# With api_key configured:
+curl -H "X-Api-Key: your-secret" http://localhost:8000/api/v1/metrics
+curl -H "X-Api-Key: your-secret" "http://localhost:8000/api/v1/recommendations?lookback_days=7&safety_margin=0.2"
+curl -H "X-Api-Key: your-secret" "http://localhost:8000/api/v1/forecast/abc123def456?horizon_hours=24&metric=memory_percent"
 ```
 
 ---
@@ -347,28 +353,26 @@ pip install -e ".[dev]"
 pytest tests/
 ```
 
-### Run specific test phases
+The suite covers the collector, storage, aggregation, policy engine, recommender, forecaster, auth/CORS, Docker events, and API caching. TimescaleDB integration tests run only when `TIMESCALE_TEST_URL` is set:
 
 ```bash
-pytest tests/test_phase1.py  # Core collector & storage
-pytest tests/test_phase2.py  # Aggregator & policy engine
-pytest tests/test_phase3.py  # Actions
-pytest tests/test_phase4.py  # API endpoints
+export TIMESCALE_TEST_URL=postgresql://dri:secret@localhost:5432/dri
+pytest tests/test_timescale.py -v
 ```
 
 ### Lint & format
 
 ```bash
-black src/        # auto-format
-flake8 src/       # lint
-mypy src/         # type check
+black src/
+flake8 src/
+mypy src/
 ```
 
 ### Dashboard development
 
 ```bash
 cd dashboard
-npm run lint      # run oxlint
+npm run lint      # oxlint
 npm run build     # production build into dist/
 npm run preview   # preview the production build
 ```
@@ -377,32 +381,29 @@ npm run preview   # preview the production build
 
 ## Optional Extras
 
-### Enable InfluxDB export
+### TimescaleDB (production-scale history)
+
+Switch to TimescaleDB for hypertable partitioning and native retention policies. See [docs/timescaledb-migration.md](docs/timescaledb-migration.md).
+
+```bash
+pip install ".[timescaledb]"
+```
+
+### InfluxDB export
 
 ```bash
 pip install ".[influxdb]"
 ```
 
-Then set in `config.yaml`:
-
-```yaml
-storage:
-  influxdb_enabled: true
-  influxdb_url: "http://influxdb:8086"
-  influxdb_token: "<your-token>"
-  influxdb_org: "dri"
-  influxdb_bucket: "metrics"
-```
-
-### Enable forecasting (statsmodels)
+### Advanced forecasting (statsmodels)
 
 ```bash
 pip install ".[forecasting]"
 ```
 
-Enables ARIMA-based forecasting at `/api/v1/forecast/<container_id>`. Falls back to linear regression when not installed.
+Enables Simple Exponential Smoothing; DRI falls back to linear regression when it is not installed.
 
-### Enable uvloop (Linux / macOS only)
+### uvloop (Linux / macOS)
 
 ```bash
 pip install ".[perf]"
@@ -412,45 +413,15 @@ pip install ".[perf]"
 
 ## Troubleshooting
 
-### Agent fails to connect to Docker daemon
+**Agent can't connect to Docker.** Make sure Docker is running (`docker info`). On Linux, check the socket: `ls -la /var/run/docker.sock`.
 
-Make sure Docker Desktop (Windows/macOS) or the Docker daemon (Linux) is running:
+**Storage path errors on Windows.** Use a Windows-style path, e.g. `sqlite_path: "C:/ProgramData/dri/metrics.db"`.
 
-```bash
-docker info
-```
+**No recommendations yet.** Recommendations need at least 10 samples per container. They appear after a few minutes of collection, and confidence improves as more history builds up.
 
-On Linux, verify the socket is accessible:
+**High memory usage.** Lower `storage.retention_hours` (for example `12`), but keep it at or above your recommender lookback if you want full-window recommendations.
 
-```bash
-ls -la /var/run/docker.sock
-```
-
-### `Event callback failed` errors
-
-This was caused by passing extra keyword arguments to the standard Python logger. Fixed in the current version of `src/dri/main.py`. If you see this error, ensure you are on the latest code.
-
-### Storage path errors on Windows
-
-The default SQLite path `/var/lib/dri/metrics.db` uses a Unix-style path. On Windows, change `sqlite_path` in `config.yaml` to a valid Windows path:
-
-```yaml
-storage:
-  sqlite_path: "C:/ProgramData/dri/metrics.db"
-```
-
-### High memory usage
-
-Reduce the retention window in `config.yaml`:
-
-```yaml
-storage:
-  retention_hours: 12
-```
-
-### High CPU / collection overhead
-
-Increase collection intervals:
+**High CPU / collection overhead.** Increase the intervals:
 
 ```yaml
 collector_interval: 10
@@ -458,14 +429,7 @@ aggregator_interval: 15
 policy_check_interval: 15
 ```
 
-### Dashboard not loading data
-
-Ensure the DRI agent is running and CORS is enabled:
-
-```yaml
-api:
-  enable_cors: true
-```
+**Dashboard not loading data.** Confirm the agent is running, CORS is enabled, and `VITE_API_BASE` / `VITE_API_KEY` match your backend.
 
 ---
 
@@ -476,7 +440,19 @@ api:
 | Agent memory | ~50–100 MB (scales with container count) |
 | CPU overhead | < 1% on typical workloads (50–100 containers) |
 | Metric latency | Sub-second collection, seconds for aggregation |
-| Storage growth | ~1 KB/sample (24 h retention ≈ 2–5 GB) |
+| API response | Recommendations and forecasts served from cache |
+| Storage growth | ~150 bytes/sample; about 18 MB per container per 7 days at 5s sampling |
+
+---
+
+## Roadmap
+
+- Smarter automated remediation (auto-apply accepted recommendations)
+- Multi-host support with a central dashboard
+- More notification channels (Slack, email, PagerDuty)
+- Config-driven runtime API URL for the dashboard container
+
+Ideas and contributions are very welcome.
 
 ---
 
@@ -492,7 +468,7 @@ api:
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
+MIT License. See [LICENSE](LICENSE) for details.
 
 ---
 
