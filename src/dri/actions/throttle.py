@@ -63,7 +63,7 @@ class ThrottleAction:
                     )
 
                 if config.memory_reservation:
-                    update_params["memory_reservation"] = self._parse_memory_limit(
+                    update_params["mem_reservation"] = self._parse_memory_limit(
                         config.memory_reservation
                     )
 

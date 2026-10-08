@@ -102,6 +102,29 @@ async def test_throttle_empty_config():
 
 
 @pytest.mark.asyncio
+async def test_throttle_memory_reservation_uses_correct_docker_key():
+    """P0-2: memory_reservation must be passed as mem_reservation to container.update(),
+    not as 'memory_reservation' (which docker-py ignores / rejects).
+    Also asserts mem_limit and memswap_limit are set correctly for '512m'.
+    """
+    from dri.actions.throttle import ThrottleAction
+    from dri.config import ThrottleConfig
+    container = _make_container()
+    result = await ThrottleAction(_make_docker_client(container)).throttle(
+        "abc123", ThrottleConfig(memory_limit="512m", memory_reservation="256m")
+    )
+    assert result["success"] is True
+    call_kwargs = container.update.call_args[1]
+    # docker-py keys
+    assert "mem_limit" in call_kwargs, "mem_limit not passed to container.update()"
+    assert "memswap_limit" in call_kwargs, "memswap_limit not passed to container.update()"
+    assert "mem_reservation" in call_kwargs, "mem_reservation not passed (got memory_reservation?)"
+    assert "memory_reservation" not in call_kwargs, "wrong key 'memory_reservation' passed to container.update()"
+    assert call_kwargs["mem_limit"] == 512 * 1024 * 1024
+    assert call_kwargs["mem_reservation"] == 256 * 1024 * 1024
+
+
+@pytest.mark.asyncio
 async def test_throttle_no_typeerror_from_logger():
     """P0-1: logger kwargs must not raise TypeError."""
     from dri.actions.throttle import ThrottleAction
