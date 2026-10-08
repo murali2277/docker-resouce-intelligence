@@ -7,7 +7,7 @@ on:
     branches: [ "main", "master" ]
 
 jobs:
-  test:
+  python-test-and-lint:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -26,9 +26,50 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -e ".[dev]"
-        # Install additional dependencies that tests might need
-        pip install mock
+        pip install mock pytest-cov bandit safety
 
-    - name: Run Python Tests
+    - name: Security Scan (Bandit)
+      run: bandit -r src/
+      continue-on-error: true
+
+    - name: Check Formatting (Black)
+      run: black --check src/ tests/
+      continue-on-error: true
+
+    - name: Lint Code (Flake8)
+      run: flake8 src/ tests/
+      continue-on-error: true
+
+    - name: Type Checking (MyPy)
+      run: mypy src/ tests/
+      continue-on-error: true
+
+    - name: Run Python Tests with Coverage
       run: |
-        pytest tests/ -v
+        pytest tests/ -v --cov=src --cov-report=term-missing
+
+  dashboard-build-and-lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./dashboard
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: './dashboard/package-lock.json'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Run Linter
+      run: npm run lint
+      continue-on-error: true
+
+    - name: Build Dashboard
+      run: npm run build
