@@ -291,3 +291,81 @@ async def test_warning_alert_does_nothing():
     agent.isolate_action.isolate.assert_not_called()
     agent.heal_action.graceful_restart.assert_not_called()
     agent.storage.save_action.assert_not_called()
+
+
+# --- P0-3: predict_oom wired into _policy_check_loop ---
+
+@pytest.mark.asyncio
+async def test_policy_check_loop_calls_predict_oom_and_emits_warning_alert():
+    """P0-3: _policy_check_loop must call heal_action.predict_oom for each container
+    and emit a 'warning' alert (via _on_alert) when risk_level is 'critical'.
+    The test calls _policy_check_loop directly with running=False so only one
+    iteration executes (the first asyncio.sleep is patched to return immediately
+    and then running is set False to exit the while-loop).
+    """
+    import asyncio
+    from dri.main import DRIAgent
+    from dri.config import DRIConfig
+    from dri.utils.metrics import AggregatedMetrics
+    from datetime import datetime, timezone
+
+    config = DRIConfig()
+    agent = DRIAgent(config)
+    agent.storage = AsyncMock()
+    agent.storage.save_alert = AsyncMock()
+
+    critical_metrics = AggregatedMetrics(
+        container_id="crit001",
+        container_name="crit-container",
+        timestamp=datetime.now(timezone.utc),
+        cpu_percent=10.0, cpu_percent_5m=10.0, cpu_percent_15m=10.0,
+        cpu_percent_60m=10.0,
+        memory_percent=97.0,  # > 95 -> critical
+        memory_percent_5m=96.0, memory_percent_15m=95.0, memory_percent_60m=80.0,
+        memory_growth_rate_1m=0.0, memory_growth_rate_5m=0.0,
+    )
+
+    mock_aggregator = AsyncMock()
+    mock_aggregator.aggregate_all = AsyncMock(return_value={"crit001": critical_metrics})
+    agent.aggregator = mock_aggregator
+
+    mock_engine = AsyncMock()
+    mock_engine.evaluate = AsyncMock(return_value=None)
+    agent.policy_engine = mock_engine
+
+    agent.heal_action = AsyncMock()
+    agent.heal_action.predict_oom = AsyncMock(
+        return_value={
+            "container_id": "crit001",
+            "container_name": "crit-container",
+            "risk_level": "critical",
+            "reason": "Memory at 97.0% of limit",
+            "memory_percent": 97.0,
+            "growth_rate_5m": 0.0,
+        }
+    )
+
+    alerts_received = []
+
+    async def fake_on_alert(alert):
+        alerts_received.append(alert)
+        if agent.storage:
+            await agent.storage.save_alert(alert)
+
+    agent._on_alert = fake_on_alert
+
+    # Patch asyncio.sleep so the loop body executes once then stops
+    async def sleep_then_stop(_):
+        agent.running = False
+
+    agent.running = True
+    with patch("asyncio.sleep", side_effect=sleep_then_stop):
+        await agent._policy_check_loop()
+
+    # predict_oom MUST have been called by _policy_check_loop
+    agent.heal_action.predict_oom.assert_called_once_with(critical_metrics)
+    # And a warning alert MUST have been emitted
+    assert len(alerts_received) >= 1, "_on_alert was never called with a warning"
+    assert any(a.alert_type == "warning" for a in alerts_received)
+    assert any(a.container_id == "crit001" for a in alerts_received)
+

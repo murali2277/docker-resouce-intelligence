@@ -270,8 +270,33 @@ class DRIAgent:
                         for alert in alerts:
                             await self._handle_alert_action(alert)
 
+                    # P0-3: OOM prediction — emit a warning alert when risk is critical
+                    if self.heal_action:
+                        try:
+                            oom = await self.heal_action.predict_oom(metrics)
+                            if oom.get("risk_level") == "critical":
+                                import uuid
+                                from .utils.metrics import Alert
+                                warn_alert = Alert(
+                                    alert_id=str(uuid.uuid4()),
+                                    container_id=metrics.container_id,
+                                    container_name=metrics.container_name,
+                                    timestamp=datetime.now(timezone.utc),
+                                    alert_type="warning",
+                                    metric="memory_percent",
+                                    current_value=metrics.memory_percent,
+                                    threshold=95.0,
+                                    message=oom.get("reason", "OOM risk critical"),
+                                )
+                                await self._on_alert(warn_alert)
+                        except Exception as oom_exc:
+                            logger_module.error(
+                                f"OOM prediction error for {container_id}: {oom_exc}"
+                            )
+
             except Exception as e:
                 logger_module.error(f"Policy check error: {e}")
+
 
     async def _handle_alert_action(self, alert) -> None:
         """Handle actions triggered by alerts."""
