@@ -124,6 +124,11 @@ class DRIConfig(BaseModel):
     api: APIConfig = Field(default_factory=APIConfig)
     actions: ActionConfig = Field(default_factory=ActionConfig)
 
+    # Alert re-notify: once an alert fires for a violation episode, suppress
+    # repeat alerts for this many seconds (unless the breach clears and restarts).
+    # Default 300 s (5 min). Set to 0 to disable de-duplication.
+    alert_renotify_seconds: int = 300
+
     # Global and per-container policies
     global_policy: ContainerPolicy = Field(default_factory=lambda: ContainerPolicy(name="global"))
     container_policies: List[ContainerPolicy] = Field(default_factory=list)

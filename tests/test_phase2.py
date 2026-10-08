@@ -227,7 +227,10 @@ async def test_aggregate_returns_aggregated_metrics():
 
 @pytest.mark.asyncio
 async def test_policy_engine_memory_growth_rate_5m_triggers_alert():
-    """Test that a policy using 'memory_growth_rate_5m' correctly maps and triggers."""
+    """Test that a policy using 'memory_growth_rate_5m' correctly maps and triggers.
+
+    After P0-4 fix: duration_seconds=0 fires on the FIRST breaching call.
+    """
     from dri.core.engine import PolicyEngine
     from dri.config import DRIConfig, ContainerPolicy, ThresholdRule
     from dri.utils.metrics import AggregatedMetrics
@@ -254,14 +257,14 @@ async def test_policy_engine_memory_growth_rate_5m_triggers_alert():
         memory_growth_rate_5m=25.0
     )
 
-    # Evaluate twice to allow violation tracker to register and then trigger
-    await engine.evaluate(metrics)
+    # P0-4: duration_seconds=0 -> alert fires on the FIRST call
     alerts = await engine.evaluate(metrics)
-    
+
     assert alerts is not None, "Alerts should be generated"
     assert len(alerts) == 1
     assert alerts[0].metric == "memory_growth_rate_5m"
     assert alerts[0].current_value == 25.0
+
 
 
 @pytest.mark.asyncio

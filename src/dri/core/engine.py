@@ -51,7 +51,10 @@ class PolicyEngine:
             config: DRI configuration with policies
         """
         self.config = config
+        # violation_key -> first-breach timestamp (simplified: just rule.metric, no container_id prefix)
         self._violation_tracker: Dict[str, Dict[str, datetime]] = defaultdict(dict)
+        # violation_key -> timestamp of last fired alert (for re-notify suppression)
+        self._last_alerted: Dict[str, Dict[str, datetime]] = defaultdict(dict)
         self._alert_callbacks: List[Callable] = []
 
     def register_alert_callback(self, callback: Callable) -> None:
@@ -127,39 +130,54 @@ class PolicyEngine:
                     applicable_policies.append(policy)
 
         alerts = []
+        now = datetime.now(timezone.utc)
+        renotify_seconds: int = getattr(self.config, "alert_renotify_seconds", 300)
 
         for policy in applicable_policies:
             for rule in policy.rules:
+                # Simplified violation key: just the metric name (container_id is the outer dict key)
+                violation_key = rule.metric
+
                 # Check if metric breaches threshold
                 if self._evaluate_metric(rule, metrics):
-                    # Track violation duration
-                    violation_key = f"{metrics.container_id}:{rule.metric}"
-                    if violation_key not in self._violation_tracker[metrics.container_id]:
-                        self._violation_tracker[metrics.container_id][violation_key] = datetime.now(timezone.utc)
-                    else:
-                        violation_start = self._violation_tracker[metrics.container_id][violation_key]
-                        violation_duration = (datetime.now(timezone.utc) - violation_start).total_seconds()
+                    cid = metrics.container_id
 
-                        # Only trigger if violation duration exceeds rule threshold
-                        if violation_duration >= rule.duration_seconds:
-                            alert = Alert(
-                                alert_id=str(uuid.uuid4()),
-                                container_id=metrics.container_id,
-                                container_name=metrics.container_name,
-                                timestamp=datetime.now(timezone.utc),
-                                alert_type=rule.action,
-                                metric=rule.metric,
-                                current_value=self._get_metric_value(rule.metric, metrics),
-                                threshold=rule.value,
-                                message=f"{rule.metric} {rule.operator} {rule.value}% for {violation_duration}s",
-                            )
-                            alerts.append(alert)
-                            await self._trigger_alert(alert)
+                    # --- Duration tracking ---
+                    if violation_key not in self._violation_tracker[cid]:
+                        # P0-4 fix: record start time on first breach
+                        self._violation_tracker[cid][violation_key] = now
+
+                    violation_start = self._violation_tracker[cid][violation_key]
+                    violation_duration = (now - violation_start).total_seconds()
+
+                    # P0-4 fix: duration_seconds==0 fires on first call (violation_duration==0 >= 0)
+                    if violation_duration >= rule.duration_seconds:
+                        # --- Re-notify suppression ---
+                        last_fired = self._last_alerted[cid].get(violation_key)
+                        if last_fired is not None and renotify_seconds > 0:
+                            elapsed_since_fire = (now - last_fired).total_seconds()
+                            if elapsed_since_fire < renotify_seconds:
+                                continue  # still in cooldown — suppress
+
+                        alert = Alert(
+                            alert_id=str(uuid.uuid4()),
+                            container_id=metrics.container_id,
+                            container_name=metrics.container_name,
+                            timestamp=now,
+                            alert_type=rule.action,
+                            metric=rule.metric,
+                            current_value=self._get_metric_value(rule.metric, metrics),
+                            threshold=rule.value,
+                            message=f"{rule.metric} {rule.operator} {rule.value}% for {violation_duration:.0f}s",
+                        )
+                        alerts.append(alert)
+                        self._last_alerted[cid][violation_key] = now
+                        await self._trigger_alert(alert)
                 else:
-                    # Reset violation tracker if no breach
-                    violation_key = f"{metrics.container_id}:{rule.metric}"
-                    if violation_key in self._violation_tracker.get(metrics.container_id, {}):
-                        del self._violation_tracker[metrics.container_id][violation_key]
+                    # Breach cleared — reset BOTH trackers so the next episode fires immediately
+                    cid = metrics.container_id
+                    self._violation_tracker[cid].pop(violation_key, None)
+                    self._last_alerted[cid].pop(violation_key, None)
 
         return alerts if alerts else None
 
