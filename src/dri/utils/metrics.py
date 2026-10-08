@@ -45,6 +45,9 @@ class ContainerMetrics:
 
     # Process metrics
     pids: int
+    
+    # Image used to run this container
+    image: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary, serializing datetime."""
@@ -95,6 +98,9 @@ class AggregatedMetrics:
 
     # Restart count for the container (tracked by DRIAgent / event listener)
     restart_count: int = 0
+    
+    # Image used to run this container
+    image: str = ""
 
 
     def to_dict(self) -> Dict[str, Any]:

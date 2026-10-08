@@ -207,9 +207,12 @@ class DockerStatsCollector:
             # PIDs — ``pids_stats`` is None on some kernels.
             pids = (stats.get("pids_stats") or {}).get("current", 0) or 0
 
+            image_str = container.attrs.get("Config", {}).get("Image", "") if hasattr(container, "attrs") else ""
+
             return ContainerMetrics(
                 container_id=(container.id or "")[:12],
                 container_name=container.name or "unknown",
+                image=image_str,
                 timestamp=datetime.now(timezone.utc),
                 cpu_percent=round(cpu_percent, 2),
                 cpu_count=cpu_count,

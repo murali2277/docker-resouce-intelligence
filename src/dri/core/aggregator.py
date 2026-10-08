@@ -301,6 +301,7 @@ class MetricsAggregator:
             agg_metrics = AggregatedMetrics(
                 container_id=latest.container_id,
                 container_name=latest.container_name,
+                image=latest.image,
                 timestamp=latest.timestamp,
                 cpu_percent=latest.cpu_percent,
                 memory_percent=latest.memory_percent,

@@ -2,6 +2,7 @@
 
 import asyncio
 import uuid
+import re
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Callable, Any
@@ -124,8 +125,13 @@ class PolicyEngine:
 
             # Check if policy applies to this container
             for key, value in policy.selector.items():
-                if key == "image" and value in metrics.container_name:
-                    applicable_policies.append(policy)
+                if key == "image":
+                    image_str = getattr(metrics, "image", "") or ""
+                    try:
+                        if image_str and re.search(value, image_str):
+                            applicable_policies.append(policy)
+                    except re.error as e:
+                        logger.error(f"Invalid regex in policy selector for image '{value}': {e}")
                 elif key == "container_id" and value == metrics.container_id:
                     applicable_policies.append(policy)
 
